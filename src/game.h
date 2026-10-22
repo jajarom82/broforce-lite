@@ -1,7 +1,7 @@
 // Broyoo - game logic + rendering. No SDL here so it can be tested headless.
 #pragma once
 #define GAME_NAME "BROFORCE LITE"
-#define GAME_VERSION "0.4.6"
+#define GAME_VERSION "0.4.7"
 #include "gfx.h"
 #include <string>
 #include <vector>

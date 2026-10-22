@@ -8,16 +8,17 @@ make clean && make headless && make
 mkdir -p build out
 ./build/headless --icon build/icon.png
 STAGE=/tmp/staging_onion
-APP=$STAGE/App/BroforceLite
-rm -rf $STAGE && mkdir -p $APP
+PORTS=$STAGE/Roms/PORTS
+APP=$PORTS/.BroforceLite   # hidden folder (leading dot): only the launcher shows up in the Ports list
+rm -rf "${STAGE:?}" && mkdir -p "$APP" "$PORTS/Imgs"
 ${CROSS_COMPILE}strip -o $APP/broforcelite build/broyoo
-cp cross-compile/launch.sh $APP/
+cp cross-compile/port_launch.sh "$PORTS/Broforce Lite.sh"
+cp build/icon.png "$PORTS/Imgs/Broforce Lite.png"
 cp build/icon.png $APP/icon.png
 cp -r assets/sounds $APP/sounds
 [ -d assets/music ] && cp -r assets/music $APP/music || echo "WARNING: no assets/music - synth music fallback"
 touch $APP/debug.txt.off   # rename to debug.txt to enable the debug mode
-sed "s/VERSION/${VERSION}/" cross-compile/config.json > $APP/config.json
-chmod +x $APP/launch.sh $APP/broforcelite
+chmod +x "$PORTS/Broforce Lite.sh" $APP/broforcelite
 FILE="broforcelite_onion_v${VERSION}.zip"
 (cd $STAGE && zip -r $FILE .)
 cp $STAGE/$FILE build/
