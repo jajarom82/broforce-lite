@@ -12,7 +12,7 @@ const BroDef BROS[NUM_BROS] = {
     {"BRODELL WALKER",  C(235,185,135), C(110,80,40),  C(140,90,40),  C(60,100,170),  C(50,70,130),  C(210,170,60), C(90,60,30),   1, P_SHOTGUN,  S_AIRSTRIKE, 3, "SHOTGUN", "AIRSTRIKE"},
     {"BRO HARD",        C(235,185,135), C(60,40,30),   C(235,185,135),C(235,235,235), C(70,70,90),   C(200,200,200),C(50,50,50),   4, P_DUAL,     S_FLASH,     3, "DUAL PISTOLS", "FLASHBANG"},
     {"MACBROVER",       C(235,185,135), C(150,110,50), C(150,110,50), C(180,50,40),   C(60,90,140),  C(230,230,230),C(200,40,40),  5, P_DYNAMITE, S_TURKEY,    3, "DYNAMITE", "BOMB TURKEY"},
-    {"BLADE BRO",       C(225,200,175), C(20,20,25),   C(20,20,25),   C(30,30,40),    C(30,30,40),   C(150,0,0),    C(200,210,220),5, P_KATANA,   S_DASH,      3, "KATANA", "DASH STRIKE"},
+    {"BLADE BRO",       C(128,88,62),  C(20,20,25),   C(20,20,25),   C(30,30,40),    C(30,30,40),   C(150,0,0),    C(200,210,220),5, P_KATANA,   S_DASH,      3, "KATANA", "DASH STRIKE"},
     {"BRO DREDD",       C(235,185,135), C(60,50,40),   C(210,190,50), C(40,40,120),   C(40,40,70),   C(220,200,60), C(60,60,70),   2, P_HOMING,   S_REMOTE,    3, "SEEKING SHOT", "GUIDED ROCKET"},
     {"BRO IN BLACK",    C(235,185,135), C(30,25,20),   C(20,20,20),   C(25,25,30),    C(25,25,30),   C(240,240,240),C(190,200,210),6, P_RAY,      S_FLASH,     3, "BLASTER", "NEURALYZER"},
     {"SNAKE BROSKIN",   C(220,175,130), C(50,40,30),   C(30,30,30),   C(90,100,70),   C(60,70,50),   C(30,30,30),   C(40,40,40),   0, P_SILENT,   S_CLOAK,     3, "SILENT SMG", "CLOAK"},
@@ -33,7 +33,7 @@ const BroDef BROS[NUM_BROS] = {
     {"BRONDLE FLY",     C(150,100,70),  C(30,25,20),   C(60,90,200),  C(70,130,80),   C(60,70,100),   C(240,230,120),C(70,70,75),   1, P_MG,       S_TURKEY,    3, "BERETTA", "BANANA BOMB"},
     {"TELEBROPORTER",   C(235,185,135), C(60,50,40),   C(40,170,225), C(235,235,245), C(60,60,85),    C(120,200,240),C(100,110,130),6, P_BURST,    S_TELEPORT,  4, "LASER BURST", "TELEPORT"},
     {"BRO MAX",         C(215,165,120), C(80,55,35),   C(80,55,35),   C(55,45,45),    C(65,55,45),    C(200,55,45),  C(90,90,95),   5, P_SHOTGUN,  S_ADRENALINE,2, "SAWED-OFF", "V8 RAGE"},
-    {"THE BROFESSIONAL",C(235,185,135), C(50,40,40),   C(40,40,55),   C(60,60,72),    C(50,50,62),    C(150,160,175),C(40,40,45),   0, P_DUAL,     S_LOCKON,    3, "TWIN PISTOLS", "COLD BLOOD"},
+    {"THE BROFESSIONAL",C(235,185,135), C(50,40,40),   C(40,40,55),   C(60,60,72),    C(50,50,62),    C(150,160,175),C(40,40,45),   0, P_DUAL,     S_LOCKON,    3, "SILENCED PISTOL", "COLD BLOOD"},
     {"XENA",            C(235,185,135), C(40,28,22),   C(190,140,50), C(176,128,50),  C(120,70,40),   C(220,200,120),C(190,190,200),5, P_CHAKRAM,  S_WARCRY,    3, "CHAKRAM", "WAR CRY"},
     {"BRO WICK",        C(235,185,135), C(35,28,25),   C(35,35,45),   C(28,28,34),    C(28,28,34),    C(240,240,240),C(20,20,24),   5, P_DUAL,     S_DASH,      3, "DUAL PISTOLS", "TACTICAL ROLL"},
     {"ROCKY BROLBOA",   C(225,170,125), C(40,30,25),   C(200,30,30),  C(200,30,30),   C(240,240,240), C(240,200,40), C(200,30,30),  0, P_FIST,     S_ADRENALINE,2, "BOXING GLOVES", "EYE OF THE TIGER"},
@@ -208,9 +208,11 @@ static Sprite build_face(const BroDef &d) {
         rect(10, 0, 13, 7, hair); rect(10, 0, 10, 7, hairL); rect(13, 2, 13, 7, hairD);
         px(11, 0, hairL); rect(7, 6, 16, 7, skinD);
         break;
-    case 4: // bald
-        dome(5, skin, skinL);
-        px(8, 3, skinL); px(9, 3, skinL); px(9, 4, skinL); px(10, 3, white); rect(8, 8, 16, 8, skinD);
+    case 4: // bald: a smooth round skull with a soft highlight
+        for (int y = 1; y <= 12; y++)
+            for (int x = 3; x <= 20; x++)
+                if (in_ellipse(x, y, 12.0f, 10.8f, 8.7f, 9.8f)) px(x, y, x >= 17 ? skinD : (x <= 8 && y <= 8 ? skinL : skin));
+        px(8, 3, skinL); px(9, 3, white); px(9, 4, skinL); px(7, 5, skinL); px(10, 2, skinL);
         break;
     case 5: // long hair
         dome(8, hair, hairL);
@@ -258,9 +260,9 @@ static Sprite build_face(const BroDef &d) {
         rect(8, 11, 10, 13, RGB(230, 190, 40)); rect(14, 11, 16, 13, RGB(230, 190, 40)); px(9, 12, dk); px(15, 12, dk);
     }
     if (is("BROMINATOR")) { // half metal face, red cybernetic eye
-        for (int y = 5; y <= 20; y++) for (int x = 12; x <= 19; x++) if (s.at(x, y) == skin || s.at(x, y) == skinD) px(x, y, (x + y) & 1 ? RGB(150, 155, 165) : RGB(120, 126, 138));
+        for (int y = 3; y <= 20; y++) for (int x = 12; x <= 19; x++) if (s.at(x, y) == skin || s.at(x, y) == skinD) px(x, y, (x + y) & 1 ? RGB(150, 155, 165) : RGB(120, 126, 138));
         rect(14, 12, 16, 13, RGB(255, 40, 30)); px(15, 12, RGB(255, 190, 150)); rect(13, 10, 17, 10, RGB(60, 60, 68));
-        rect(12, 5, 12, 12, RGB(60, 62, 70));
+        rect(12, 3, 12, 12, RGB(60, 62, 70));
     }
     if (is("BROBOCOP") || is("BRO DREDD")) { // visor over the eyes
         u32 vis = is("BROBOCOP") ? RGB(15, 20, 30) : RGB(20, 25, 60);

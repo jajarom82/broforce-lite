@@ -246,6 +246,16 @@ static float aim_angle(const Input &in, int face, bool air) {
     return face > 0 ? 0.0f : PI_F;
 }
 
+// big-calibre guns (revolver, assault rifle, machine gun, Mauser) use the heavy shot sound; the laser burst has its own zap; small automatics keep the light one
+static int gun_sfx(const BroDef &b) {
+    switch (b.prim) {
+    case P_REVOLVER: return SFX_POWERSHOT;
+    case P_MG: return (strcmp(b.primName, "MACHINE GUN") == 0 || strcmp(b.primName, "MAUSER") == 0) ? SFX_POWERSHOT : SFX_SHOT;
+    case P_BURST: return strcmp(b.primName, "PULSE RIFLE") == 0 ? SFX_POWERSHOT : strcmp(b.primName, "LASER BURST") == 0 ? SFX_LASER : SFX_SHOT;
+    default: return SFX_SHOT;
+    }
+}
+
 void Game::fire_primary(const Input &in) {
     Player &p = pl;
     const BroDef &b = BROS[p.bro];
@@ -272,11 +282,11 @@ void Game::fire_primary(const Input &in) {
         return;
     }
     if (b.prim == P_MINIGUN) {
-        if (held) { if (p.spin < 40) p.spin++; } else { p.spin = std::max(0, p.spin - 2); return; }
+        if (held) { if (p.spin == 0) snd(SFX_SPINUP, p.a.x, p.a.y, 1.0f); if (p.spin < 40) p.spin++; } else { p.spin = std::max(0, p.spin - 2); return; }
         if (p.spin < 25 || p.cool > 0) return;
         shot(PK_BULLET, float(rndi(-2, 2)), 5.5f, 45, 1);
         p.cool = 3;
-        if (tick % 2 == 0) snd(SFX_SHOT, p.a.x, p.a.y, 0.7f);
+        if (tick % 2 == 0) snd(SFX_SHOT, p.a.x, p.a.y, 1.0f); // light shot every other frame, a bit louder to make up for the stacking
         trauma = std::min(1.0f, trauma + 0.012f);
         return;
     }
@@ -285,12 +295,12 @@ void Game::fire_primary(const Input &in) {
     case P_MG:
         shot(PK_BULLET, float(rndi(-1, 1)), 5.0f, 50, 1);
         p.cool = 7; trauma = std::min(1.0f, trauma + 0.012f);
-        snd(SFX_SHOT, p.a.x, p.a.y);
+        snd(gun_sfx(b), p.a.x, p.a.y);
         break;
     case P_BURST:
         if (p.burst <= 0) p.burst = 3;
         shot(PK_BULLET, 0, 5.5f, 50, 1);
-        snd(SFX_SHOT, p.a.x, p.a.y);
+        snd(gun_sfx(b), p.a.x, p.a.y);
         trauma = std::min(1.0f, trauma + 0.012f);
         if (--p.burst <= 0) p.cool = 24; else p.cool = 3;
         break;
@@ -307,7 +317,7 @@ void Game::fire_primary(const Input &in) {
         f.vx = cosf(ang) * 2.2f - sinf(ang) * sp; f.vy = sinf(ang) * 2.2f + cosf(ang) * sp;
         add_proj(f);
         p.cool = 2;
-        if (tick % 6 == 0) snd(SFX_FLAME, p.a.x, p.a.y);
+        flameT = 3; // the front-end loops the flame sound while this stays on
         break;
     }
     case P_SHOTGUN:
@@ -316,6 +326,12 @@ void Game::fire_primary(const Input &in) {
         snd(SFX_SHOTGUN, p.a.x, p.a.y);
         break;
     case P_DUAL:
+        if (strcmp(b.primName, "SILENCED PISTOL") == 0) { // one silenced round at a time
+            shot(PK_BULLET, 0, 5.5f, 50, 1);
+            p.cool = 11; trauma = std::min(1.0f, trauma + 0.004f);
+            snd(SFX_SILENCED, p.a.x, p.a.y, 0.8f);
+            break;
+        }
         shot(PK_BULLET, -3, 5.0f, 50, 1);
         shot(PK_BULLET, 3, 5.0f, 50, 1);
         p.cool = 8; trauma = std::min(1.0f, trauma + 0.012f);
@@ -353,7 +369,7 @@ void Game::fire_primary(const Input &in) {
     case P_SILENT:
         shot(PK_BULLET, float(rndi(-1, 1)), 6.0f, 45, 1);
         p.cool = 4;
-        snd(SFX_SHOT, p.a.x, p.a.y, 0.4f);
+        snd(SFX_SILENCED, p.a.x, p.a.y, 0.8f);
         break;
     case P_REVOLVER:
         if (p.reload > 0) return;
@@ -361,9 +377,9 @@ void Game::fire_primary(const Input &in) {
         shot(PK_REVBULLET, 0, 6.5f, 60, 3);
         p.cool = 12;
         p.revAmmo--;
-        snd(SFX_SHOTGUN, p.a.x, p.a.y, 0.6f);
+        snd(gun_sfx(b), p.a.x, p.a.y);
         trauma = std::min(1.0f, trauma + 0.05f);
-        if (p.revAmmo <= 0) { p.reload = 50; p.revAmmo = 6; }
+        if (p.revAmmo <= 0) { p.reload = 50; p.revAmmo = 6; snd(SFX_RELOAD, p.a.x, p.a.y, 0.9f); }
         break;
     case P_WHIP:
         if (!fireEdge) return;
@@ -384,7 +400,7 @@ void Game::fire_primary(const Input &in) {
     case P_CHAINSAW: {
         do_melee(15, 1, true);
         p.cool = 4; p.meleeT = 4;
-        if (tick % 3 == 0) snd(SFX_FLAME, p.a.x, p.a.y, 0.7f);
+        sawT = 6; // the front-end loops the engine sound while this stays on
         if (pa.size() < 700) {
             Particle q; q.x = p.a.x + float(p.a.face) * 12; q.y = p.a.y - 9 + float(rndi(-3, 3)); q.vx = float(p.a.face) * (0.5f + rnd()); q.vy = -rnd() * 1.2f;
             q.life = q.maxlife = 10; q.col = RGB(255, 220, 120); q.kind = 2; pa.push_back(q);
@@ -531,7 +547,18 @@ void Game::kill_enemy(int i, float dirx, int cause) {
     e.alive = false;
     stat_kills++;
     snd(e.type == E_DOG ? SFX_BARK : SFX_DEATH, e.a.x, e.a.y);
-    if (e.type == E_BOMBER) cause = C_EXPLOSION; // it blows up whatever killed it
+    // a kamikaze only goes off when his fuse runs out. Killed with the fuse lit, he still blows up when it ends;
+    // killed by a blast / gas / fire he catches alight (standard fuse); a bullet sometimes hits the explosives (instant blast);
+    // crushed: instant blast; lightning lights the fuse; killed any other way (blades, spikes, ...) with no fuse lit, he is just dead.
+    int bomberFuse = 0;
+    if (e.type == E_BOMBER) {
+        if (e.aux < 0) bomberFuse = 0;                         // the fuse just ran out: handled below, right now
+        else if (e.aux > 0) bomberFuse = e.aux;
+        else if (cause == C_EXPLOSION || cause == C_GAS || cause == C_FIRE || cause == C_LIGHTNING) { bomberFuse = 188; snd(SFX_IGNITE, e.a.x, e.a.y, 0.9f); } // lit: the standard fuse
+        else if (cause == C_CRUSH) e.aux = -1;                       // crushed: the explosives go off at once
+        else if (cause == C_BULLET && rnd() < 0.35f) e.aux = -1;   // the bullet hit the explosives: instant blast
+        cause = C_EXPLOSION;
+    }
     if (e.type != E_BOSS && killLog.size() < 400) killLog.push_back({uint8_t(e.type), uint8_t(cause), int8_t(dirx >= 0 ? 1 : -1)});
     if (e.type == E_OFFICER) start_exfil(e.a.x, e.a.y);
     if (e.type == E_BOSS) {
@@ -547,7 +574,7 @@ void Game::kill_enemy(int i, float dirx, int cause) {
     int n = e.type == E_HEAVY ? 90 : e.type == E_DOG ? 28 : 50;
     gore(e.a.x, e.a.y - 8, n, dirx >= 0 ? 1.0f : -1.0f, RGB(200, 20, 20));
     gibs(e.a.x, e.a.y - 8, e.type == E_HEAVY ? 8 : e.type == E_DOG ? 3 : 4, dirx >= 0 ? 1.0f : -1.0f);
-    if (e.type == E_BOMBER) pend.push_back({e.a.x, e.a.y - 7, 24.0f, 12.0f, false});
+    if (e.type == E_BOMBER && (e.aux < 0 || bomberFuse > 0)) pend.push_back({e.a.x, e.a.y - 7, 24.0f, 12.0f, false, e.aux < 0 ? 0 : bomberFuse});
 }
 
 void Game::open_cage(Prop &c) {
@@ -578,6 +605,7 @@ void Game::update_player(const Input &in) {
     if (p.cloak > 0) p.cloak--;
     if (p.meleeT > 0) p.meleeT--;
     if (p.punchT > 0) p.punchT--;
+    if (flameT > 0) flameT--; if (sawT > 0) sawT--;
     if (p.whipT > 0) p.whipT--;
     if (p.reload > 0) p.reload--;
     if (p.ride) { p.a.vx = 0; p.a.vy = 0; p.a.ground = false; return; } // hanging from the helicopter ladder
@@ -681,7 +709,7 @@ void Game::update_player(const Input &in) {
             Particle q; q.x = p.a.x - float(p.a.face) * 2 + (rnd() - 0.5f) * 3; q.y = p.a.y; q.vx = 0; q.vy = 1.2f + rnd(); q.life = q.maxlife = 12;
             q.col = rnd() < 0.5f ? RGB(255, 220, 80) : RGB(255, 110, 30); q.kind = 2; pa.push_back(q);
         }
-        if (p.jet % 8 == 0) snd(SFX_FLAME, p.a.x, p.a.y, 0.5f);
+        if (p.jet % 8 == 0) snd(SFX_JET, p.a.x, p.a.y, 0.6f);
     }
     if (p.grappleT == 0) p.a.vy += GRAV;
     float maxfall = p.wall ? 1.0f : 5.0f;
@@ -806,16 +834,21 @@ void Game::update_enemies() {
             float range = e.type == E_BOMBER ? 150.0f : 170.0f;
             if (fabsf(dx) < range && fabsf(dy) < 50 && ((dx > 0) == (e.a.face > 0) || e.alert > 0) && los(e.a.x, e.a.y - 8, pl.a.x, pl.a.y - 8)) see = true;
         }
-        if (see) { if (e.alert == 0) { e.alert = 1; e.timer = rndi(44, 62); /* reaction time: 0.7-1.0 s */ if (e.type == E_BOMBER) { snd(SFX_SCREAM, e.a.x, e.a.y, 1.0f); e.aux = 188; } } } // the fuse is lit: ~3 s to live
+        if (see) { if (e.alert == 0) { e.alert = 1; e.timer = rndi(44, 62); /* reaction time: 0.7-1.0 s */ if (e.type == E_BOMBER) { snd(SFX_SCREAM, e.a.x, e.a.y, 1.0f); snd(SFX_IGNITE, e.a.x, e.a.y, 0.9f); e.aux = 188; } } } // the fuse is lit: ~3 s to live
         else if (e.alert > 0 && ++e.alert > 180) e.alert = 0;
-        if (e.type == E_BOMBER && e.aux > 0 && --e.aux == 0) { kill_enemy(int(i), 0, C_EXPLOSION); continue; } // blows up 3 s after charging, wherever he is
+        if (e.type == E_BOMBER && e.aux > 0 && --e.aux == 0) { e.aux = -1; kill_enemy(int(i), 0, C_EXPLOSION); continue; } // blows up 3 s after charging, wherever he is
 
+        if (e.type == E_BOMBER && e.aux > 0 && pa.size() < 700 && tick % 3 == 0) { // the lit fuse spits sparks
+            Particle f; f.x = e.a.x + float(e.a.face) * 3; f.y = e.a.y - 8; f.vx = (rnd() - 0.5f) * 0.5f; f.vy = -0.5f - rnd() * 0.6f;
+            f.life = f.maxlife = rndi(8, 14); f.col = rnd() < 0.5f ? RGB(255, 225, 90) : RGB(255, 120, 30); f.kind = 4;
+            pa.push_back(f);
+        }
         float speed = e.type == E_BOMBER ? 1.15f : e.type == E_HEAVY ? 0.35f : 0.45f;
         float want = 0;
         if (e.alert > 0 && e.type == E_BOMBER && see) {
             want = dx > 0 ? 1.0f : -1.0f;
             e.a.face = int(want);
-            if (fabsf(dx) < 12 && fabsf(dy) < 14) { kill_enemy(int(i), dx); continue; }
+            if (fabsf(dx) < 12 && fabsf(dy) < 14) want = 0; // right next to you: he waits for the fuse to run out
         } else if (e.alert > 0 && see) {
             e.a.face = dx > 0 ? 1 : -1;
             if (e.timer > 0) e.timer--;
@@ -1159,10 +1192,10 @@ void Game::update_props() {
 }
 
 // ---- main update ------------------------------------------------------------------
-void Game::snd(int id, float x, float y, float vol) {
+void Game::snd(int id, float x, float y, float vol, float minK) {
     float cx = pl.alive ? pl.a.x : camX + VW / 2.0f, cy = pl.alive ? pl.a.y : camY + VH / 2.0f;
     float d = sqrtf((x - cx) * (x - cx) + (y - cy) * (y - cy));
-    float k = 1.0f - d / 340.0f;
+    float k = std::max(minK, 1.0f - d / 340.0f);
     if (k <= 0 || sounds.size() >= 24) return;
     sounds.push_back({id, vol * k});
 }
@@ -1206,7 +1239,7 @@ void Game::update(const Input &in) {
         stateT++;
         if (bannerT > 0) bannerT--;
         if (flashScreen > 0) flashScreen--;
-        update_gas();
+        update_gas(); update_trees();
         if (pl.alive) update_player(in);
         else {
             pl.deadT++;

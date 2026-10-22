@@ -327,6 +327,7 @@ void Game::gen_level(int lvl) {
     memset(blood, 0, sizeof(blood));
     memset(pillar, 0, sizeof(pillar));
     crumble.clear();
+    trees.clear();
     burnList.clear(); gas.clear(); chunks.clear(); collapseQ.clear(); riding = -1;
     en.clear(); pr.clear(); pa.clear(); booms.clear(); props.clear(); pend.clear(); strikes.clear();
     bossIdx = -1;
@@ -478,6 +479,17 @@ void Game::gen_level(int lvl) {
             add_prop(PR_AMMO, float((fx + 2) * TS), float(fy * TS));
         }
     }
+    // jungle palms: tall background trees of varied sizes, scattered along the ground
+    if (!boss && world == 0) {
+        for (int x = 16; x < W - 8; x += rndi(5, 12)) {
+            if (hgt[x] >= H - 2) continue;
+            Tree t;
+            t.x = float(x * TS + rndi(0, 7)); t.y = float(hgt[x] * TS);
+            t.h = rndi(44, 100);
+            t.lean = rndi(-9, 9);
+            trees.push_back(t);
+        }
+    }
     // clear spawn area
     for (int x = 3; x < 12; x++)
         for (int y = 0; y < hgt[x]; y++) set_tile(x, y, T_AIR);
@@ -548,6 +560,14 @@ void Game::gore(float x, float y, int n, float dirx, u32 col) {
     }
 }
 
+void Game::clear_topping(int tx, int ty) {
+    if (ty <= 0) return;
+    uint8_t u = tile[(ty - 1) * MAXW + tx];
+    if (u != T_SPIKE && u != T_WIRE) return;
+    tile[(ty - 1) * MAXW + tx] = T_AIR;
+    debris(float(tx * TS + 4), float((ty - 1) * TS + 4), 3, u == T_SPIKE ? RGB(170, 175, 185) : RGB(150, 150, 155), 1.2f);
+}
+
 void Game::damage_tile(int tx, int ty, int dmg, bool silent) {
     if (tx < 0 || tx >= W || ty < 0 || ty >= H) return;
     uint8_t t = tile[ty * MAXW + tx];
@@ -558,6 +578,7 @@ void Game::damage_tile(int tx, int ty, int dmg, bool silent) {
         tile[ty * MAXW + tx] = T_AIR;
         fireT[ty * MAXW + tx] = 0;
         if (collapseQ.size() < 600) collapseQ.push_back({tx, ty});
+        clear_topping(tx, ty);
         if (ty > 0 && tile[(ty - 1) * MAXW + tx] == T_SAND) sand_fall(tx, ty - 1); // dig into sand and it always caves in
         if (t == T_CRATE && rnd() < 0.3f) { // some crates hold ammo: it drops to the ground below
             int gy = ty + 1;
@@ -594,7 +615,8 @@ void Game::process_explosions() {
         ran++;
         stat_explosions++;
         booms.push_back({ex.x, ex.y, 0, ex.r > 36 ? 22 : 16, ex.r});
-        snd(ex.r > 36 ? SFX_BOOM_BIG : ex.r > 30 ? SFX_BOOM : SFX_BOOM_SMALL, ex.x, ex.y, 1.0f);
+        snd(ex.r > 36 ? SFX_BOOM_BIG : ex.r > 30 ? SFX_BOOM : SFX_BOOM_SMALL, ex.x, ex.y, 1.0f, ex.r > 30 ? 0.35f : 0.0f); // big blasts are heard even from off-screen
+        hit_trees(ex.x, ex.y, ex.r);
         int ns = int(ex.r / 2);
         for (int i = 0; i < ns && pa.size() < 700; i++) {
             Particle p;
@@ -674,10 +696,11 @@ void Game::ignite_tile(int tx, int ty, int fuse) {
     if (fuse <= 0) fuse = t == T_BARREL ? rndi(60, 190) : t == T_CRATE ? rndi(150, 320) : rndi(180, 420);
     fireT[idx] = uint16_t(fuse);
     burnList.push_back(idx);
-    if (tick % 3 == 0) snd(SFX_IGNITE, float(tx * TS), float(ty * TS), 0.5f);
+    snd(SFX_IGNITE, float(tx * TS), float(ty * TS), 0.6f); // crackle (the audio side never stacks two of them)
 }
 
 void Game::update_fire() {
+    if (!burnList.empty() && tick % 200 == 0) { int b = burnList[0]; snd(SFX_IGNITE, float((b % MAXW) * TS), float((b / MAXW) * TS), 0.6f); } // keeps crackling while it burns
     for (size_t i = 0; i < burnList.size();) {
         int idx = burnList[i];
         int x = idx % MAXW, y = idx / MAXW;
@@ -710,6 +733,7 @@ void Game::update_fire() {
         if (fireT[idx] == 0) { // burnt through
             tile[idx] = T_AIR;
             if (collapseQ.size() < 600) collapseQ.push_back({x, y});
+            clear_topping(x, y);
             if (t == T_BARREL) pend.push_back({cx, cy, 30.0f, 16.0f, false, 0});
             else {
                 debris(cx, cy, 4, t == T_WOOD ? th.wood : RGB(70, 50, 30), 1.2f);
@@ -761,7 +785,7 @@ void Game::update_gas() {
                     g.dy = -sinf(ang);
                     g.state = 2;
                     g.t = 0;
-                    g.fuse = rndi(95, 155);
+                    g.fuse = rndi(45, 80); // a short flight: it goes off before it leaves the screen
                     g.a.vy = 0;
                     snd(SFX_IGNITE, g.a.x, g.a.y, 1.0f);
                 }
@@ -908,6 +932,7 @@ void Game::process_collapse() {
                 int x = r % MAXW, y = r / MAXW;
                 if (tile[r] == T_AIR) { pillar[r] = 0; debris(float(x * TS + 4), float(y * TS + 4), 2, th.wood, 1.0f); continue; }
                 c.t.push_back({x - minx, y - miny, tile[r], tvar[r]});
+                clear_topping(x, y);
                 tile[r] = T_AIR;
                 if (pa.size() < 700 && rnd() < 0.15f) debris(float(x * TS + 4), float(y * TS + 4), 1, th.dirt, 0.8f);
             }
@@ -984,5 +1009,93 @@ void Game::update_chunks() {
         }
         if (c.y > float(H * TS + 80)) { chunks.erase(chunks.begin() + long(ci)); continue; }
         ci++;
+    }
+}
+
+// ---- jungle palms ----------------------------------------------------------------------
+// trunk point at fraction f (0 foot, 1 top), before any toppling
+static void tree_point(const Tree &t, float f, float &px, float &up) {
+    px = float(t.lean) * f * f;
+    up = float(t.h) * f;
+}
+
+void Game::hit_trees(float x, float y, float r) {
+    for (Tree &t : trees) {
+        if (t.fall > 0) continue;
+        bool hit = false;
+        for (int i = 0; i <= 8 && !hit; i++) {
+            float px, up;
+            tree_point(t, float(i) / 8.0f, px, up);
+            float dx = t.x + px - x, dy = t.y - up - y;
+            float reach = r + (i == 8 ? 14.0f : 3.0f); // the crown is wide
+            if (dx * dx + dy * dy < reach * reach) hit = true;
+        }
+        if (!hit) continue;
+        t.fall = 1;
+        t.dir = x < t.x ? 1 : -1; // topples away from the blast
+        snd(SFX_CRASH, t.x, t.y - float(t.h) / 2, 0.5f);
+    }
+}
+
+void Game::update_trees() {
+    for (size_t i = 0; i < trees.size();) {
+        Tree &t = trees[i];
+        if (t.fall > 0 && ++t.fall > 34) { // lands: leaves and splinters
+            for (int k = 0; k < 6; k++) {
+                float f = 0.4f + 0.12f * float(k);
+                debris(t.x + float(t.dir) * float(t.h) * f * 0.9f, t.y - 3, 2, k < 2 ? RGB(60, 120, 40) : th.woodDk, 1.4f);
+            }
+            trees[i] = trees.back();
+            trees.pop_back();
+            continue;
+        }
+        i++;
+    }
+}
+
+void Game::draw_trees(Gfx &g, int ox, int oy) {
+    for (const Tree &t : trees) {
+        if (t.x + 40 < float(ox) || t.x - 40 > float(ox + VW) || t.y < float(oy) || t.y - float(t.h) - 40 > float(oy + VH)) continue;
+        float ang = t.fall > 0 ? 1.45f * (float(t.fall) / 34.0f) * (float(t.fall) / 34.0f) : 0.0f; // accelerating topple, up to ~83 degrees
+        float th2 = ang * float(t.dir), cs = cosf(th2), sn = sinf(th2);
+        float sway = t.fall > 0 ? 0.0f : sinf(float(tick) * 0.03f + t.x * 0.1f) * 1.2f;
+        auto place = [&](float px, float up, int &sx, int &sy) { // rotate about the foot
+            sx = int(t.x + px * cs + up * sn) - ox;
+            sy = int(t.y - (up * cs - px * sn)) - oy;
+        };
+        int n = t.h;
+        for (int i = 0; i <= n; i++) { // trunk, a little thinner towards the top, with growth rings
+            float f = float(i) / float(n), px, up;
+            tree_point(t, f, px, up);
+            int sx, sy;
+            place(px + sway * f * f, up, sx, sy);
+            int w = f < 0.5f ? 4 : 3;
+            bool ring = (i % 5) == 0;
+            u32 c = ring ? RGB(88, 62, 38) : (i & 1 ? RGB(128, 92, 58) : RGB(116, 82, 50));
+            g.rect(sx - w / 2, sy, w, 2, c);
+            g.pset(sx - w / 2, sy, RGB(150, 112, 74));
+        }
+        float tpx, tup;
+        tree_point(t, 1.0f, tpx, tup);
+        int cx, cy;
+        place(tpx + sway, tup, cx, cy);
+        // crown: drooping fronds with leaflets
+        int flen = 14 + t.h / 7;
+        for (int k = 0; k < 8; k++) {
+            float phi = (-0.15f + 3.3f * float(k) / 7.0f) - th2; // from just below the horizon on the right, over the top, to the left
+            float cp = cosf(phi), sp = sinf(phi);
+            for (int s2 = 1; s2 <= flen; s2++) {
+                float u = float(s2) / float(flen);
+                int fx = cx + int(cp * float(s2)), fy = cy - int(sp * float(s2) * 0.75f) + int(u * u * float(flen) * 0.55f);
+                u32 c = (k & 1) ? RGB(40, 120, 48) : RGB(62, 150, 58);
+                g.pset(fx, fy, c);
+                if (s2 > 3 && (s2 & 1)) { // leaflets hang down on both sides of the rib
+                    g.pset(fx, fy + 1, RGB(34, 96, 40));
+                    g.pset(fx + (cp > 0 ? 1 : -1), fy + 1, c);
+                }
+            }
+        }
+        g.rect(cx - 1, cy, 3, 3, RGB(104, 70, 40));  // coconuts under the crown
+        g.rect(cx + 2, cy + 1, 2, 2, RGB(88, 58, 34));
     }
 }

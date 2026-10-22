@@ -186,6 +186,28 @@ void Game::draw_punch(Gfx &g, const Player &p, int sx, int sy) {
     if (prog < 0.5f) for (int k = 0; k < 3; k++) bar(-2 - k * 2, -k * 2 + 0, 1, RGB(235, 235, 245)); // speed lines behind
 }
 
+// Chainsaw of Ash: red engine block with a handle, a long guide bar and a chain whose teeth run while he saws. Shakes while firing.
+void Game::draw_chainsaw(Gfx &g, const Player &p, int sx, int sy) {
+    const BroDef &d = BROS[p.bro];
+    const int f = p.a.face >= 0 ? 1 : -1;
+    bool run = p.meleeT > 0 || sawT > 0;
+    int shake = run ? ((tick & 1) ? 1 : 0) : 0;
+    int hx = sx + f * 4, hy = sy - 8 + shake;
+    auto bx = [&](int off, int w) { return f > 0 ? hx + off : hx - off - w + 1; };   // x of a horizontal span starting `off` px in front of the hand
+    g.rect(bx(-2, 3), hy + 1, 3, 3, RGB(40, 40, 46));                                 // rear handle
+    g.rect(bx(0, 7), hy - 2, 7, 6, d.gun);                                            // engine block
+    g.rect(bx(0, 7), hy - 2, 7, 1, lerp_c(d.gun, RGB(255, 255, 255), 1, 5));
+    g.rect(bx(1, 2), hy - 1, 2, 1, RGB(240, 240, 245));                               // pull-start cover
+    g.rect(bx(5, 2), hy + 2, 2, 2, RGB(30, 30, 34));                                  // front grip
+    g.rect(bx(7, 16), hy - 1, 16, 4, RGB(190, 195, 205));                             // guide bar
+    g.rect(bx(7, 16), hy, 16, 2, RGB(120, 125, 135));
+    for (int i = 0; i < 16; i++) { // chain teeth along both edges, marching when it runs
+        bool on = ((i + (run ? tick / 2 : 0)) & 1) == 0;
+        if (on) { g.pset(bx(7 + i, 1), hy - 1, RGB(60, 60, 66)); g.pset(bx(7 + (15 - i), 1), hy + 2, RGB(60, 60, 66)); }
+    }
+    g.rect(bx(22, 2), hy - 1, 2, 4, RGB(150, 155, 165));                              // rounded tip
+}
+
 void Game::draw_actor_bro(Gfx &g, const Actor &a, int bro, int anim, bool air, bool flash, bool ghost) {
     int frame = air ? 3 : (fabsf(a.vx) > 0.2f ? 1 + (anim / 6) % 2 : 0);
     const Sprite &s = broSpr[bro][frame];
@@ -204,14 +226,18 @@ void Game::draw_enemy(Gfx &g, const Enemy &e, int sx, int sy) {
     int x = sx - 9, y = sy - (e.type == E_DOG ? 11 : 17) + bob;
     if (e.flash > 0) g.sprite_tint(s, x, y, e.a.face < 0, RGB(255, 255, 255));
     else g.sprite(s, x, y, e.a.face < 0);
-    if (e.type == E_BOMBER) { // explosive belt: a row of dynamite sticks and a blinking detonator
+    if (e.type == E_BOMBER) { // explosive belt: a row of dynamite sticks and a lit-fuse flame
         int bx = sx - 5, by = y + 9;
         g.rect(bx - 1, by, 12, 4, RGB(50, 35, 25));
         for (int k = 0; k < 4; k++) {
             g.rect(bx + k * 3, by - 1, 2, 5, RGB(210, 40, 35));
             g.rect(bx + k * 3, by - 1, 2, 1, RGB(255, 220, 90));
         }
-        if ((e.anim / 6) % 2) g.rect(bx + 4, by + 4, 2, 2, RGB(255, 60, 40));
+        if (e.aux > 0) { // lit fuse: a small flickering flame on the belt
+            int fl = (e.anim / 2) % 3;
+            g.rect(bx + 4, by - 3 - fl, 2, 2 + fl, RGB(255, 130, 30));
+            g.rect(bx + 4, by - 2 - fl, 1, 1 + fl, RGB(255, 235, 110));
+        }
     }
     if (e.type == E_RPG) { // bazooka over the shoulder
         int dir = e.a.face >= 0 ? 1 : -1;
@@ -358,6 +384,7 @@ void Game::render(Gfx &g) {
     }
     int ox = int(camX) + shakeX, oy = int(camY) + shakeY;
     draw_bg(g);
+    draw_trees(g, ox, oy); // background plane, behind the ground and everyone
     int tx0 = std::max(0, ox / TS), tx1 = std::min(W - 1, (ox + VW) / TS);
     int ty0 = std::max(0, oy / TS), ty1 = std::min(H - 1, (oy + VH) / TS);
     for (int ty = ty0; ty <= ty1; ty++)
@@ -415,6 +442,7 @@ void Game::render(Gfx &g) {
         }
         int sx = int(pl.a.x) - ox, sy = int(pl.a.y) - oy;
         if (BROS[pl.bro].prim == P_KATANA) draw_saber(g, pl, sx, sy);
+        else if (BROS[pl.bro].prim == P_CHAINSAW) draw_chainsaw(g, pl, sx, sy);
         else if (pl.punchT > 0) draw_punch(g, pl, sx, sy);
         if (pl.whipT > 0) {
             int len = int(float(pl.whipLen) * (pl.whipT > 7 ? 1.0f : float(pl.whipT) / 7.0f)); // lash out, hold, then coil back

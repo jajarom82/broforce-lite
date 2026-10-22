@@ -442,14 +442,14 @@ const char *SFX_NAMES[SFX_COUNT] = {
     "shot", "shotgun", "rocket", "flame", "ray", "slash", "throw", "boom", "boom_small",
     "death", "pdeath", "jump", "eshot", "pickup", "cage", "flag", "fanfare", "menu",
     "select", "crash", "lightning", "hit", "special", "gasp", "laugh", "scream", "heli",
-    "tick", "ignite", "jet", "boom_big", "bark"};
+    "tick", "ignite", "jet", "boom_big", "bark", "silenced", "powershot", "laser", "chainsaw", "spinup", "reload"};
 const char *SP_NAMES[SP_COUNT] = {"gogogo", "letsgo", "herewego", "lockload", "nomercy", "failed", "rip", "nooo", "brodown", "newbro"};
 // per-sound gain after the files' own normalisation (frequent sounds quieter, booms and voices louder)
 const float SFX_GAIN[SFX_COUNT] = {
-    0.55f, 0.85f, 1.4f, 0.5f, 1, 0.6f, 0.5f, 1.0f, 0.9f,
+    0.55f, 0.85f, 1.4f, 1.1f, 1, 0.6f, 0.5f, 1.0f, 0.9f,
     0.8f, 0.95f, 0.35f, 0.5f, 0.6f, 0.7f, 0.6f, 1, 0.5f,
     0.6f, 0.9f, 0.7f, 0.4f, 1, 0.8f, 0.85f, 0.9f, 1.0f,
-    1, 0.6f, 0.5f, 1.0f, 0.8f};
+    1, 0.6f, 0.5f, 1.0f, 0.8f, 0.45f, 0.6f, 0.8f, 0.5f, 0.8f, 0.8f};
 Sample bank[SFX_COUNT][MAXVAR];
 int bankN[SFX_COUNT];
 Sample spBank[SP_COUNT];
@@ -458,6 +458,11 @@ SVoice sv[MAXSV];
 Sample heliLoop;
 float heliTarget = 0, heliCur = 0, heliPh = 0;
 int heliPos = 0;
+float flameTarget = 0, flameCur = 0;
+float sawTarget = 0, sawCur = 0;
+int sawPos = 0;
+float sawPh = 0;
+int flamePos = 0;
 
 void sv_play(const Sample *s, float vol) {
     int slot = -1, best = -1;
@@ -521,6 +526,14 @@ int audio_load_samples(const char *dir) {
 }
 
 void audio_init(int rate) { g_rate = rate; }
+void audio_saw(float on) {
+    if (on > 0 && sawTarget <= 0 && sawCur < 0.02f) sawPos = 0;
+    sawTarget = on > 0 ? 1.0f : 0.0f;
+}
+void audio_flame(float on) {
+    if (on > 0 && flameTarget <= 0 && flameCur < 0.02f) flamePos = 0; // a new burst starts at the beginning of the recording
+    flameTarget = on > 0 ? 1.0f : 0.0f;
+}
 void audio_heli(float vol) { heliTarget = vol < 0 ? 0 : vol > 1 ? 1 : vol; }
 void audio_set_volumes(float sfx, float music) { g_sfx = sfx; g_music = music; }
 
@@ -553,6 +566,7 @@ void audio_trigger(int s, float vol) {
     if (vol <= 0.01f) return;
     float v = vol > 1 ? 1 : vol;
     if (s >= 0 && s < SFX_COUNT && bankN[s] > 0) {
+        if (s == SFX_IGNITE) for (const SVoice &c : sv) if (c.s && c.s == &bank[s][0] && c.pos < c.s->n / 2) return; // one crackle at a time
         g_rng = g_rng * 1664525u + 1013904223u;
         sv_play(&bank[s][(g_rng >> 16) % unsigned(bankN[s])], v * SFX_GAIN[s]);
         return;
@@ -608,6 +622,9 @@ void audio_trigger(int s, float vol) {
     case SFX_TICK: voice(K_SQ, 900, 1300, 0.03f, 0.15f * v); break;
     case SFX_IGNITE: voice(K_NOISE, 0, 0, 0.4f, 0.5f * v, 0.3f, 0, 0, 0, 1); break;
     case SFX_JET: voice(K_NOISE, 0, 0, 0.14f, 0.3f * v, 0.4f); break;
+    case SFX_POWERSHOT: voice(K_NOISE, 0, 0, 0.2f, 0.7f * v, 0.3f); voice(K_SQ, 700, 140, 0.12f, 0.3f * v); voice(K_SINE, 160, 50, 0.16f, 0.5f * v); break; // heavy-calibre crack
+    case SFX_LASER: voice(K_SQ, 1800, 500, 0.12f, 0.25f * v); voice(K_SINE, 900, 300, 0.14f, 0.25f * v); break; // zap (fallback)
+    case SFX_SILENCED: voice(K_NOISE, 0, 0, 0.07f, 0.18f * v, 0.2f); voice(K_SINE, 120, 50, 0.05f, 0.14f * v); break; // muffled 'pfft'
     case SFX_BARK: // two gruff barks
         voice(K_VOICE, 330, 190, 0.12f, 1.0f * v, 0.3f, 0, 650, 1100);
         voice(K_VOICE, 320, 180, 0.12f, 0.9f * v, 0.3f, 0.2f, 650, 1100);
@@ -654,6 +671,22 @@ void audio_mix(int16_t *out, int frames) {
             if (!c.s) continue;
             m += float(c.s->d[c.pos]) * (1.0f / 32768.0f) * c.vol;
             if (++c.pos >= c.s->n) c.s = nullptr;
+        }
+        flameCur += (flameTarget - flameCur) * 0.004f; // ~10 ms ramps: no clicks
+        if (flameCur > 0.003f) {
+            if (bankN[SFX_FLAME] > 0) {
+                const Sample &fs = bank[SFX_FLAME][0];
+                m += float(fs.d[flamePos]) * (1.0f / 32768.0f) * flameCur * SFX_GAIN[SFX_FLAME];
+                if (++flamePos >= fs.n) flamePos = 0;
+            } else m += rnd1() * 0.12f * flameCur; // synth fallback: a hiss
+        }
+        sawCur += (sawTarget - sawCur) * 0.004f;
+        if (sawCur > 0.003f) {
+            if (bankN[SFX_CHAINSAW] > 0) {
+                const Sample &ss = bank[SFX_CHAINSAW][0];
+                m += float(ss.d[sawPos]) * (1.0f / 32768.0f) * sawCur * SFX_GAIN[SFX_CHAINSAW];
+                if (++sawPos >= ss.n) sawPos = 0;
+            } else { sawPh += 95.0f / float(g_rate); if (sawPh > 1) sawPh -= 1; m += ((sawPh * 2.0f - 1.0f) * 0.25f + rnd1() * 0.1f) * sawCur; } // synth fallback: a buzz
         }
         heliCur += (heliTarget - heliCur) * 0.0008f; // ~60 ms smoothing: no clicks when the level changes
         if (heliCur > 0.003f) {

@@ -211,6 +211,8 @@ int main() {
             audio_set_volumes(float(game->st.sfx) / 100.0f, float(game->st.music) / 100.0f);
             audio_music(game->music_track());
             audio_heli(game->heli_volume());
+            audio_flame(game->flame_volume());
+            audio_saw(game->saw_volume());
             for (const SndEvt &se : game->sounds) {
                 if (se.id >= SPEECH_BASE) audio_speak(se.id - SPEECH_BASE, se.vol);
                 else audio_trigger(se.id, se.vol);

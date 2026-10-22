@@ -1,7 +1,7 @@
 // Broyoo - game logic + rendering. No SDL here so it can be tested headless.
 #pragma once
 #define GAME_NAME "BROFORCE LITE"
-#define GAME_VERSION "0.4.7"
+#define GAME_VERSION "0.4.8"
 #include "gfx.h"
 #include <string>
 #include <vector>
@@ -131,6 +131,13 @@ struct Gas {
     float halfW() const { return state == 2 ? 7.0f : 3.0f; }
 };
 
+// background palm tree (jungle): destroyed by explosions, then topples away from the blast
+struct Tree {
+    float x = 0, y = 0;      // foot of the trunk
+    int h = 60, lean = 0;    // height, and how far the top leans sideways
+    int fall = 0, dir = 1;   // >0: toppling (ticks), direction
+};
+
 struct Player {
     Actor a;
     bool wired = false; // tangled in barbed wire
@@ -168,6 +175,7 @@ public:
     int cam_x() const { return int(camX); }
     void debug_teleport(float x, float y);
     int enemies_alive() const;
+    void debug_hurt_enemy(int i, int dmg, int cause) { hurt_enemy(i, dmg, 1.0f, cause); }
     GState state() const { return gs; }
     int stat_kills = 0;
     int stat_explosions = 0;
@@ -218,6 +226,7 @@ public:
     }
     void debug_clear_enemies() { en.clear(); bossIdx = -1; gas.clear(); riding = -1; }
     void debug_add_gas(float x, float y) { add_gas(x, y); }
+    int gas_alive() const { int n = 0; for (const Gas &b : gas) if (b.alive) n++; return n; }
     void debug_ignite_gas(int i) { ignite_gas(i, 10); }
     void debug_ignite_tile(int x, int y) { ignite_tile(x, y); }
     bool debug_burning(int x, int y) const { return x >= 0 && x < W && y >= 0 && y < H && fireT[y * MAXW + x] > 0; }
@@ -234,6 +243,11 @@ public:
     int exfil_resT() const { return ex.resT; }
     int exfil_phase() const { return ex.phase; }
     const Sprite &debug_face(int b) const { return broFace[b]; }
+    float saw_volume() const { return (sawT > 0 && gs == GS_PLAY) ? 1.0f : 0.0f; }
+    float flame_volume() const { return (flameT > 0 && gs == GS_PLAY) ? 1.0f : 0.0f; } // flamethrower loop on / off
+    int tree_count() const { int n = 0; for (const Tree &t : trees) if (t.fall == 0) n++; return n; }
+    void debug_clear_trees() { trees.clear(); }
+    void debug_add_tree(float x, float y, int h) { Tree t; t.x = x; t.y = y; t.h = h; trees.push_back(t); }
     float heli_volume() const { return (ex.phase > 0 && gs == GS_PLAY) ? ex.vol : 0.0f; } // rotor loop level 0..1
     bool exfil_done() const { return ex.done; }
     int kill_log_size() const { return int(killLog.size()); }
@@ -293,6 +307,8 @@ private:
     int surf[MAXW]; // original ground row per column (cave/crater backdrop)
     uint8_t pillar[MAXW * MAXH]; // support pillars (background plane): hp, 0 = none. Only explosions damage them
     struct Crumble { int x, y, t; };
+    std::vector<Tree> trees;      // jungle palms (background plane)
+    int flameT = 0, sawT = 0;               // ticks left on the flamethrower sound loop
     std::vector<Crumble> crumble; // pillar cells waiting to be checked for support (they crumble one after another)
     struct Mount { int cx, hw, h; };
     std::vector<Mount> mounts;
@@ -379,8 +395,12 @@ private:
     void stain(int tx, int ty, int amt);
     void gibs(float x, float y, int n, float dirx);
     void draw_gas(Gfx &g, int ox, int oy);
+    void draw_trees(Gfx &g, int ox, int oy);
+    void clear_topping(int tx, int ty); // spikes / barbed wire standing on a tile that just vanished go with it
+    void update_trees();
+    void hit_trees(float x, float y, float r);
     void update_chunks();
-    void snd(int id, float x, float y, float vol = 1.0f);
+    void snd(int id, float x, float y, float vol = 1.0f, float minK = 0.0f); // minK: never quieter than this fraction (far blasts stay audible)
     std::vector<int> queue;      // upcoming bros (one per spare life)
     int newBro = -1, rosterSel = 0;
     bool debugMode = false;
@@ -457,6 +477,7 @@ private:
     void draw_tile(Gfx &g, int tx, int ty, int sx, int sy);
     void draw_bg(Gfx &g);
     void draw_saber(Gfx &g, const Player &p, int sx, int sy);
+    void draw_chainsaw(Gfx &g, const Player &p, int sx, int sy);
     void draw_punch(Gfx &g, const Player &p, int sx, int sy);
     void draw_actor_bro(Gfx &g, const Actor &a, int bro, int anim, bool air, bool flash, bool ghost);
     void draw_enemy(Gfx &g, const Enemy &e, int sx, int sy);

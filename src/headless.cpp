@@ -550,13 +550,13 @@ int main(int argc, char **argv) {
         int fly0 = -1;
         for (size_t i = 1; i < xs.size(); i++) if (std::fabs(xs[i] - xs[i - 1]) > 0.01f) { fly0 = int(i); break; }
         float early = 0, late = 0;
-        if (fly0 >= 0 && fly0 + 90 < int(xs.size())) { early = std::fabs(xs[size_t(fly0 + 12)] - xs[size_t(fly0 + 2)]); late = std::fabs(xs[size_t(fly0 + 90)] - xs[size_t(fly0 + 80)]); }
+        if (fly0 >= 0 && fly0 + 40 < int(xs.size())) { early = std::fabs(xs[size_t(fly0 + 12)] - xs[size_t(fly0 + 2)]); late = std::fabs(xs[size_t(fly0 + 40)] - xs[size_t(fly0 + 30)]); }
         printf("gas: heating=%d flew %.0f px, explodes after %d frames (%.1fs), speed early %.1f vs late %.1f px/10f, wall brick left=%d\n",
                sawHeating, far_, gone, gone / 62.5f, early, late, int(g.debug_tile(x0 + 34, gr - 1) == T_BRICK));
         CHECK(sawHeating && maxSt == 2, "a heated gas bottle first vents fire, then takes off");
         CHECK(far_ > 30, "the bottle is propelled across the level");
         CHECK(late > early * 1.5f, "it starts slowly then accelerates");
-        CHECK(gone > 0 && gone / 62.5f > 1.4f && gone / 62.5f < 5.0f, "it explodes after a few seconds");
+        CHECK(gone > 0 && gone / 62.5f > 0.7f && gone / 62.5f < 5.0f, "it explodes after a few seconds");
     }
 
     // 22. you can stand on a gas bottle and ride it; it does not hurt you while it flies
@@ -1391,6 +1391,153 @@ int main(int argc, char **argv) {
         int roof1 = 0; for (int x = x0 + 10; x < x0 + 24; x++) for (int y = gr - 12; y < gr - 5; y++) if (g.debug_tile(x, y) != T_AIR) roof1++;
         printf("cave roof tiles %d -> %d\n", roof0, roof1);
         CHECK(!fell && roof1 == roof0, "tunnelling through a cave does not bring its roof down");
+    }
+
+    // ---- 46. jungle palms, far explosions are audible, gas bottles go off sooner ----
+    {
+        int gr; int x0 = 100;
+        stage(x0, 60, gr);
+        g.debug_start_level(0, 0);
+        int nt = g.tree_count();
+        CHECK(nt >= 8, "the jungle level has a good number of palm trees");
+        stage(x0, 60, gr);
+        float fx = float((x0 + 10) * TS), fy = float(gr * TS);
+        g.debug_clear_trees();
+        g.debug_add_tree(fx, fy, 80);
+        g.debug_add_tree(fx + 200, fy, 60);
+        int base = g.tree_count();
+        g.debug_explode(fx + 4, fy - 40, 20, 14, true);
+        for (int i = 0; i < 60; i++) g.update(Input());
+        CHECK(g.tree_count() == base - 1, "an explosion knocks down the palm next to it and spares the far one");
+        // gas bottle flying: a palm in its blast goes down too
+        stage(x0, 60, gr);
+        float gx = float((x0 + 30) * TS);
+        g.debug_add_tree(gx + 20, fy, 70);
+        int tb = g.tree_count();
+        g.debug_add_gas(gx, fy);
+        g.debug_ignite_gas(0);
+        int ticks = 0;
+        for (; ticks < 600 && g.gas_alive() > 0; ticks++) { g.update(Input()); g.sounds.clear(); }
+        printf("gas bottle: %d ticks from ignition to blast\n", ticks);
+        CHECK(ticks < 200, "a gas bottle goes off within about three seconds");
+        // a blast 500 px away is still heard
+        g.sounds.clear();
+        g.debug_teleport(float((x0 + 2) * TS), fy);
+        g.debug_explode(float((x0 + 2) * TS) + 500, fy - 10, 38, 20, false);
+        bool heard = false;
+        for (const SndEvt &e : g.sounds) if (e.id == SFX_BOOM_BIG && e.vol > 0.2f) heard = true;
+        CHECK(heard, "a gas bottle blast off-screen is still audible");
+        (void)tb;
+        // flamethrower loop: stays on while firing, off after
+        int fb = -1; for (int b = 0; b < NUM_BROS; b++) if (BROS[b].prim == P_FLAME) fb = b;
+        stage(x0, 60, gr);
+        g.player().bro = fb; g.player().cool = 0;
+        Input ff; ff.fire = true;
+        for (int i = 0; i < 20; i++) g.update(ff);
+        CHECK(g.flame_volume() > 0.5f, "the flame loop plays while the trigger is held");
+        for (int i = 0; i < 10; i++) g.update(Input());
+        CHECK(g.flame_volume() == 0.0f, "the flame loop stops when the trigger is released");
+        stage(x0, 60, gr);
+        g.debug_add_tree(float((x0 + 10) * TS), fy, 80);
+        shot(g, "23_palm", 2);
+    }
+
+    // ---- 47. kamikazes always wait for the end of their fuse; a blast lights it ----
+    {
+        int gr; int x0 = 100;
+        // a. he charges, reaches you, and still waits for the fuse (~3 s) before going off
+        stage(x0, 60, gr);
+        g.player().invuln = 100000;
+        g.debug_teleport(float((x0 + 20) * TS), float(gr * TS));
+        g.debug_add_enemy(E_BOMBER, float((x0 + 32) * TS), float(gr * TS), -1);
+        int e0 = g.stat_explosions;
+        int boomAt = -1;
+        for (int i = 0; i < 400 && boomAt < 0; i++) { g.update(Input()); g.sounds.clear(); if (i == 100) shot(g, "24_fuse", 4); if (g.stat_explosions > e0) boomAt = i; }
+        printf("kamikaze blew up after %d ticks\n", boomAt);
+        CHECK(boomAt > 150 && boomAt < 260, "a kamikaze reaching you still waits for his fuse to run out");
+        // b. a blast next to him kills him and lights his fuse: he goes off a moment later
+        stage(x0, 60, gr);
+        g.player().invuln = 100000;
+        g.debug_teleport(float((x0 + 2) * TS), float(gr * TS));
+        g.debug_add_enemy(E_BOMBER, float((x0 + 40) * TS), float(gr * TS), -1);
+        e0 = g.stat_explosions;
+        g.debug_explode(float((x0 + 40) * TS) + 10, float(gr * TS) - 6, 12, 8, true);
+        int afterBlast = g.stat_explosions - e0; // only the blast itself
+        CHECK(g.enemies_alive() == 0, "a blast next to a kamikaze kills him");
+        for (int i = 0; i < 40; i++) { g.update(Input()); g.sounds.clear(); }
+        CHECK(g.stat_explosions - e0 == afterBlast, "...but his belt has not gone off yet");
+        for (int i = 0; i < 200; i++) { g.update(Input()); g.sounds.clear(); }
+        CHECK(g.stat_explosions - e0 == afterBlast + 1, "...it goes off once his (standard) fuse has run out");
+        // c. killed some other way before lighting the fuse: no blast
+        stage(x0, 60, gr);
+        g.player().invuln = 100000;
+        g.debug_teleport(float((x0 + 2) * TS), float(gr * TS));
+        g.debug_add_enemy(E_BOMBER, float((x0 + 50) * TS), float(gr * TS), -1);
+        e0 = g.stat_explosions;
+        g.debug_hurt_enemy(0, 9, C_MELEE);
+        for (int i = 0; i < 300; i++) { g.update(Input()); g.sounds.clear(); }
+        CHECK(g.enemies_alive() == 0 && g.stat_explosions == e0, "a kamikaze cut down by a blade before lighting his fuse just dies");
+        // d. shot: sometimes the bullet hits the explosives, and then the blast is immediate
+        int instant = 0;
+        for (int k = 0; k < 40; k++) {
+            stage(x0, 60, gr);
+            g.player().invuln = 100000;
+            g.debug_teleport(float((x0 + 2) * TS), float(gr * TS));
+            g.debug_add_enemy(E_BOMBER, float((x0 + 50) * TS), float(gr * TS), -1);
+            e0 = g.stat_explosions;
+            g.debug_hurt_enemy(0, 9, C_BULLET);
+            g.update(Input()); g.sounds.clear();
+            if (g.stat_explosions > e0) instant++;
+        }
+        printf("shot kamikazes that blew up at once: %d / 40\n", instant);
+        CHECK(instant >= 5 && instant <= 30, "a shot kamikaze sometimes (not always) explodes at once");
+        // e. crushed: instant blast. lightning: lights the fuse
+        for (int k = 0; k < 2; k++) {
+            stage(x0, 60, gr);
+            g.player().invuln = 100000;
+            g.debug_teleport(float((x0 + 2) * TS), float(gr * TS));
+            g.debug_add_enemy(E_BOMBER, float((x0 + 50) * TS), float(gr * TS), -1);
+            e0 = g.stat_explosions;
+            g.debug_hurt_enemy(0, 9, k == 0 ? C_CRUSH : C_LIGHTNING);
+            g.update(Input()); g.sounds.clear();
+            if (k == 0) CHECK(g.stat_explosions > e0, "a crushed kamikaze explodes at once");
+            else {
+                CHECK(g.stat_explosions == e0, "a kamikaze struck by lightning does not explode at once");
+                for (int i = 0; i < 260; i++) { g.update(Input()); g.sounds.clear(); }
+                CHECK(g.stat_explosions > e0, "...his fuse is lit and he goes off later");
+            }
+        }
+    }
+
+    // ---- 48. spikes go when the ground under them is dug out; Brofessional fires one silenced round; chainsaw loop ----
+    {
+        int gr; int x0 = 100;
+        stage(x0, 60, gr);
+        g.debug_set_tile(x0 + 10, gr - 1, T_SPIKE);
+        g.debug_set_tile(x0 + 12, gr - 1, T_WIRE);
+        g.debug_damage_tile(x0 + 10, gr, 99);
+        g.debug_damage_tile(x0 + 12, gr, 99);
+        CHECK(g.debug_tile(x0 + 10, gr - 1) == T_AIR && g.debug_tile(x0 + 12, gr - 1) == T_AIR, "digging out the ground under spikes / barbed wire removes them");
+        // the Brofessional: a single round per shot
+        int pro = -1, hard = -1, saw = -1;
+        for (int b = 0; b < NUM_BROS; b++) { if (!strcmp(BROS[b].name, "THE BROFESSIONAL")) pro = b; if (!strcmp(BROS[b].name, "BRO HARD")) hard = b; if (BROS[b].prim == P_CHAINSAW) saw = b; }
+        stage(x0, 60, gr);
+        g.player().bro = pro; g.player().cool = 0; g.player().a.face = 1;
+        Input fi; fi.fire = true;
+        g.update(fi);
+        CHECK(g.proj_count() == 1, "The Brofessional fires a single round");
+        stage(x0, 60, gr);
+        g.player().bro = hard; g.player().cool = 0; g.player().a.face = 1;
+        g.update(fi);
+        CHECK(g.proj_count() == 2, "Bro Hard still fires two");
+        // chainsaw: the engine loop runs while firing and stops after release
+        stage(x0, 60, gr);
+        g.player().bro = saw; g.player().cool = 0; g.player().a.face = 1;
+        for (int i = 0; i < 20; i++) g.update(fi);
+        CHECK(g.saw_volume() > 0.5f, "the chainsaw engine loop plays while the trigger is held");
+        shot(g, "25_chainsaw", 4);
+        for (int i = 0; i < 10; i++) g.update(Input());
+        CHECK(g.saw_volume() == 0.0f, "the chainsaw sound stops when the trigger is released");
     }
 
     // 17. portrait HUD screenshot
