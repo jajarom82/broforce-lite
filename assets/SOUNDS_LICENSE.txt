@@ -1,0 +1,13 @@
+Broforce-lite sound bank (assets/sounds, produced by build_sounds.py: trimmed / normalised / filtered)
+
+Sources, all CC0 (public domain) unless stated:
+ - 25 CC0 bang / firework SFX            (OpenGameArt, CC0)
+ - 100 CC0 SFX                           (OpenGameArt, rubberduck, CC0)
+ - 80 CC0 creature SFX                   (OpenGameArt, rubberduck, CC0)
+ - Gunshot Sounds                        (OpenGameArt, Tabasco, CC0)
+ - Male Grunt/Yelling sounds             (OpenGameArt, HaelDB, CC0 option)
+ - Evil laughter                         (OpenGameArt, qubodup, CC0)
+ - Evil Laugh                            (OpenGameArt, AntumDeluge, CC0)
+ - Dog barking mono                      (OpenGameArt, Brandon Morris / HaelDB, CC0 option)
+ - Helicopter sounds                     (OpenGameArt, aquinn, CC0)
+Voice lines sp_*.wav: generated with Kokoro-82M TTS (Apache-2.0), voice am_michael, then pitch-shifted and saturated.
