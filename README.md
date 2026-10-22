@@ -1,5 +1,5 @@
 # broforce-lite
-a demake of Broforce game for handhelds
+a *Claude* demake of Broforce game for handhelds
 
 This was made primarily for a Miyoo Mini+
 The goal was to have something fun like Broforce, when I don't have access to my computer. One player only.
