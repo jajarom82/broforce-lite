@@ -1,5 +1,6 @@
 // Broyoo - rendering, HUD and menus
 #include "game.h"
+#include <cstring>
 #include "audio.h"
 #include "phrases.h"
 #include <cmath>
@@ -129,12 +130,13 @@ void Game::draw_saber(Gfx &g, const Player &p, int sx, int sy) {
     const int f = p.a.face >= 0 ? 1 : -1;
     const int hx = sx + f * 5, hy = sy - 9;      // the hand
     float ang;                                    // degrees above the horizontal, towards the facing side
-    int len = 15;
+    const bool great = !strcmp(d.primName, "GREAT SWORD");
+    int len = great ? 21 : 15;
     bool swing = p.meleeT > 0, dash = p.dashT > 0;
     if (swing) {
         float prog = 1.0f - float(p.meleeT) / (p.meleeT > 10 ? 16.0f : 10.0f);   // 0 = raised, 1 = low and forward
         ang = 110.0f - 150.0f * prog;
-        len = 18;
+        len = great ? 25 : 18;
     } else if (dash) ang = 0.0f;
     else ang = 62.0f + (p.a.ground ? 0.0f : -12.0f);
     float rad = ang * 3.14159265f / 180.0f;
@@ -157,7 +159,7 @@ void Game::draw_saber(Gfx &g, const Player &p, int sx, int sy) {
 void Game::draw_punch(Gfx &g, const Player &p, int sx, int sy) {
     const BroDef &d = BROS[p.bro];
     const int f = p.a.face >= 0 ? 1 : -1;
-    int total = p.meleeT > 6 ? 10 : 8;
+    int total = p.punchMax;
     float prog = 1.0f - float(p.punchT) / float(total);               // 0..1
     float ext = prog < 0.4f ? prog / 0.4f : 1.0f - (prog - 0.4f) / 0.6f * 0.8f; // out fast, back slower
     int len = 3 + int(ext * 10.0f);
@@ -208,10 +210,22 @@ void Game::draw_chainsaw(Gfx &g, const Player &p, int sx, int sy) {
     g.rect(bx(22, 2), hy - 1, 2, 4, RGB(150, 155, 165));                              // rounded tip
 }
 
-void Game::draw_actor_bro(Gfx &g, const Actor &a, int bro, int anim, bool air, bool flash, bool ghost) {
+void Game::draw_actor_bro(Gfx &g, const Actor &a, int bro, int anim, bool air, bool flash, bool ghost, bool crouch) {
     int frame = air ? 3 : (fabsf(a.vx) > 0.2f ? 1 + (anim / 6) % 2 : 0);
     const Sprite &s = broSpr[bro][frame];
     int sx = int(roundf(a.x)) - 9 - int(camX) - shakeX, sy = int(roundf(a.y)) - 17 - int(camY) - shakeY;
+    if (crouch && !flash && !ghost) { // ducked: the middle of the body is squeezed out, the head drops 3 px
+        int h0 = 10, cut = 3;
+        for (int y = 0; y < s.h; y++) {
+            if (y >= h0 && y < h0 + cut) continue;
+            int dy = y < h0 ? y + cut : y;
+            for (int x = 0; x < s.w; x++) {
+                u32 c = s.at(x, y);
+                if (c) g.pset(sx + (a.face < 0 ? s.w - 1 - x : x), sy + dy, c);
+            }
+        }
+        return;
+    }
     if (flash) g.sprite_tint(s, sx, sy, a.face < 0, RGB(255, 255, 255));
     else if (ghost) sprite_ghost(g, s, sx, sy, a.face < 0, tick);
     else g.sprite(s, sx, sy, a.face < 0);
@@ -223,8 +237,9 @@ void Game::draw_enemy(Gfx &g, const Enemy &e, int sx, int sy) {
     if (e.type == E_OFFICER) frame = 0;
     const Sprite &s = enSpr[e.type][frame];
     int bob = e.laugh > 0 ? ((e.laugh / 3) % 2 ? -2 : 0) : 0; // shaking with laughter
-    int x = sx - 9, y = sy - (e.type == E_DOG ? 11 : 17) + bob;
+    int x = sx - s.w / 2, y = sy - (s.h - 1) + bob;
     if (e.flash > 0) g.sprite_tint(s, x, y, e.a.face < 0, RGB(255, 255, 255));
+    else if (e.frozen) { g.sprite_tint(s, x, y, e.a.face < 0, RGB(150, 210, 245)); g.rect_blend(x, y + 2, s.w, s.h - 2, RGB(210, 240, 255), 90); }
     else g.sprite(s, x, y, e.a.face < 0);
     if (e.type == E_BOMBER) { // explosive belt: a row of dynamite sticks and a lit-fuse flame
         int bx = sx - 5, by = y + 9;
@@ -238,6 +253,16 @@ void Game::draw_enemy(Gfx &g, const Enemy &e, int sx, int sy) {
             g.rect(bx + 4, by - 3 - fl, 2, 2 + fl, RGB(255, 130, 30));
             g.rect(bx + 4, by - 2 - fl, 1, 1 + fl, RGB(255, 235, 110));
         }
+    }
+    if (e.type == E_GUNNER) { // heavy machine gun on a bipod arm, ammo belt across the chest, muzzle flash while he fires
+        int dir = e.a.face >= 0 ? 1 : -1;
+        int gx = sx + dir * 3 - (dir > 0 ? 0 : 17), gy = y + 9;
+        g.rect(gx, gy, 18, 3, RGB(35, 35, 40));
+        g.rect(gx + (dir > 0 ? 12 : 0), gy - 1, 6, 2, RGB(70, 70, 78));                     // barrel jacket
+        g.rect(gx + (dir > 0 ? 2 : 11), gy + 3, 5, 4, RGB(60, 60, 50));                     // ammo box
+        g.rect(gx + (dir > 0 ? 3 : 12), gy + 7, 3, 2, RGB(200, 170, 60));                   // belt feeding in
+        for (int k = 0; k < 4; k++) g.pset(sx - 5 + k * 3 - (dir > 0 ? 0 : -1), y + 8 + k, RGB(220, 190, 70)); // bandolier
+        if (e.aux > 0 && (tick & 1)) { int mxp = dir > 0 ? gx + 18 : gx - 3; g.rect(mxp, gy - 1, 3, 4, RGB(255, 240, 150)); g.rect(mxp + (dir > 0 ? 3 : -2), gy, 2, 2, RGB(255, 150, 50)); }
     }
     if (e.type == E_RPG) { // bazooka over the shoulder
         int dir = e.a.face >= 0 ? 1 : -1;
@@ -308,11 +333,11 @@ void Game::draw_hud(Gfx &g) {
     g.rect(px - 1, py - 1, 50, 50, RGB(255, 215, 60));
     g.rect(px, py, 48, 48, th.night ? RGB(40, 50, 90) : RGB(90, 150, 210));
     {   // face only: 24x24 drawn portrait at 2x
-        const Sprite &s = broFace[pl.bro];
+        const Sprite &s = pl.alive ? broFace[pl.bro] : broFaceDead[pl.bro]; // a dead bro shows his dead face
         for (int j = 0; j < s.h; j++)
             for (int i = 0; i < s.w; i++) {
                 u32 c = s.at(i, j);
-                if (c) g.rect(px + i * 2, py + j * 2, 2, 2, (pl.alive || (tick / 4) % 2) ? c : RGB(120, 30, 30));
+                if (c) g.rect(px + i * 2, py + j * 2, 2, 2, c);
             }
     }
     int tx = px + 54;
@@ -363,6 +388,11 @@ void Game::draw_hud(Gfx &g) {
         if (t[0]) g.text_shadow((VW - Gfx::text_w(t, 2)) / 2, 40, t, RGB(255, 70, 50), 2);
     }
     // banners
+    if (toastT > 0 && pl.alive) { // short message floating above the bro
+        int tw = Gfx::text_w(toastMsg);
+        int ty = int(pl.a.y) - int(camY) - 32 - (toastT < 20 ? (20 - toastT) / 4 : 0);
+        g.text_shadow(int(pl.a.x) - int(camX) - tw / 2, ty, toastMsg, RGB(255, 240, 120));
+    }
     if (bannerT > 0 && pl.alive) {
         g.text_shadow((VW - Gfx::text_w(b.name, 2)) / 2, 40, b.name, RGB(255, 235, 120), 2);
         char pb[64];
@@ -438,12 +468,12 @@ void Game::render(Gfx &g) {
         bool blink = pl.invuln > 0 && pl.invuln < 1000 && !golden && pl.dashT == 0 && (tick / 3) % 2 == 0;
         if (!blink) {
             bool flashy = golden && (tick / 2) % 2 == 0;
-            draw_actor_bro(g, pl.a, pl.bro, pl.anim, !pl.a.ground, flashy, pl.cloak > 0);
+            draw_actor_bro(g, pl.a, pl.bro, pl.anim, !pl.a.ground, flashy, pl.cloak > 0, pl.crouch);
         }
-        int sx = int(pl.a.x) - ox, sy = int(pl.a.y) - oy;
-        if (BROS[pl.bro].prim == P_KATANA) draw_saber(g, pl, sx, sy);
+        int sx = int(pl.a.x) - ox, sy = int(pl.a.y) - oy + (pl.crouch ? 3 : 0);
+        if (pl.punchT > 0) draw_punch(g, pl, sx, sy);
+        else if (BROS[pl.bro].prim == P_KATANA) draw_saber(g, pl, sx, sy);
         else if (BROS[pl.bro].prim == P_CHAINSAW) draw_chainsaw(g, pl, sx, sy);
-        else if (pl.punchT > 0) draw_punch(g, pl, sx, sy);
         if (pl.whipT > 0) {
             int len = int(float(pl.whipLen) * (pl.whipT > 7 ? 1.0f : float(pl.whipT) / 7.0f)); // lash out, hold, then coil back
             for (int i = 0; i < len; i++) g.rect(sx + pl.a.face * (6 + i) - (pl.a.face < 0 ? 1 : 0), sy - 10 + (i % 7 < 2 ? 1 : 0) - (i > len - 6 ? 1 : 0), 2, 2, i > len - 4 ? RGB(250, 230, 160) : RGB(170, 115, 60));
@@ -738,19 +768,19 @@ void Game::draw_roster(Gfx &g) {
     char b[80];
     snprintf(b, sizeof(b), "BROS %d/%d", owned_count(sl), NUM_BROS);
     g.text_shadow((VW - Gfx::text_w(b, 3)) / 2, 6, b, RGB(255, 215, 60), 3);
-    const int COLS = 8, CW = 38, CH = 40, X0 = (VW - COLS * CW) / 2, Y0 = 36;
+    const int COLS = 9, CW = 35, CH = 40, X0 = (VW - COLS * CW) / 2, Y0 = 36;
     for (int i = 0; i < NUM_BROS; i++) {
         int cx = X0 + (i % COLS) * CW, cy = Y0 + (i / COLS) * CH;
         bool has = owned(i), sel = i == rosterSel;
-        g.rect(cx + 2, cy, 34, 36, sel ? RGB(255, 215, 60) : RGB(40, 44, 58));
-        g.rect(cx + 3, cy + 1, 32, 34, has ? RGB(90, 150, 210) : RGB(46, 48, 56));
+        g.rect(cx + 1, cy, 33, 36, sel ? RGB(255, 215, 60) : RGB(40, 44, 58));
+        g.rect(cx + 2, cy + 1, 31, 34, has ? RGB(90, 150, 210) : RGB(46, 48, 56));
         if (has) {
             const Sprite &f = broFace[i];
-            for (int j = 0; j < f.h; j++) for (int k = 0; k < f.w; k++) { u32 c = f.at(k, j); if (c) g.pset(cx + 7 + k, cy + 6 + j, c); }
+            for (int j = 0; j < f.h; j++) for (int k = 0; k < f.w; k++) { u32 c = f.at(k, j); if (c) g.pset(cx + 5 + k, cy + 6 + j, c); }
         } else { // caged: the same bagged, tied-up prisoner for everybody
-            for (int j = 0; j < captiveSpr.h; j++) for (int k = 0; k < captiveSpr.w; k++) { u32 c = captiveSpr.at(k, j); if (c) g.pset(cx + 8 + k, cy + 8 + j, c); }
-            for (int k = 0; k < 6; k++) g.rect(cx + 5 + k * 5, cy + 2, 1, 32, RGB(150, 155, 170));
-            g.rect(cx + 4, cy + 2, 30, 2, RGB(150, 155, 170)); g.rect(cx + 4, cy + 32, 30, 2, RGB(150, 155, 170));
+            for (int j = 0; j < captiveSpr.h; j++) for (int k = 0; k < captiveSpr.w; k++) { u32 c = captiveSpr.at(k, j); if (c) g.pset(cx + 7 + k, cy + 8 + j, c); }
+            for (int k = 0; k < 6; k++) g.rect(cx + 4 + k * 5, cy + 2, 1, 32, RGB(150, 155, 170));
+            g.rect(cx + 3, cy + 2, 29, 2, RGB(150, 155, 170)); g.rect(cx + 3, cy + 32, 29, 2, RGB(150, 155, 170));
         }
     }
     int sy = Y0 + ((NUM_BROS + COLS - 1) / COLS) * CH + 2;
@@ -860,7 +890,7 @@ void Game::update_menu(const Input &in) {
     int unl = unlocked_of(st.slots[curSlot]);
     int n = gs == GS_TITLE ? 3 : gs == GS_PAUSE ? 3 : gs == GS_OPTIONS ? 6 : gs == GS_OVER ? 2 : gs == GS_SLOTS ? 5 : gs == GS_MISSIONS ? unl + 5 : 1;
     if (gs == GS_ROSTER) { // the grid of bros of this save
-        const int COLS = 8;
+        const int COLS = 9;
         if (left) rosterSel = (rosterSel + NUM_BROS - 1) % NUM_BROS;
         if (right) rosterSel = (rosterSel + 1) % NUM_BROS;
         if (up) rosterSel = (rosterSel - COLS + NUM_BROS) % NUM_BROS;
@@ -1144,9 +1174,9 @@ void Game::draw_exfil_ui(Gfx &g) {
     g.text_shadow(PX + 8, PY + 26, buf, RGB(255, 255, 255));
     int counts[E_TYPES] = {0};
     for (const KillRec &kr : killLog) if (kr.type < E_TYPES) counts[kr.type]++;
-    static const int order6[6] = {E_MOOK, E_RPG, E_HEAVY, E_BOMBER, E_DOG, E_OFFICER};
-    for (int k = 0; k < 6; k++) {
-        int x = PX + 100 + k * 32;
+    static const int order6[7] = {E_MOOK, E_RPG, E_HEAVY, E_GUNNER, E_BOMBER, E_DOG, E_OFFICER};
+    for (int k = 0; k < 7; k++) {
+        int x = PX + 96 + k * 28;
         draw_icon12(g, enSpr[order6[k]][0], x, PY + 14);
         snprintf(buf, sizeof(buf), "X%d", counts[order6[k]]);
         g.text(x + 1, PY + 28, buf, RGB(200, 210, 230));

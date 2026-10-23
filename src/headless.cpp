@@ -109,7 +109,7 @@ int main(int argc, char **argv) {
     run(g, 5, Input());
     g.player().invuln = 0;
     // drop the bro into a freshly emptied column so he falls through the world naturally
-    for (int y = 0; y < 60; y++) g.debug_explode(g.player().a.x, float(y * TS + 4), 6, 30);
+    for (int y = 0; y < 60; y++) for (int dx = -2; dx <= 2; dx++) g.debug_damage_tile(int(g.player().a.x / TS) + dx, y, 99); // (a blast would now throw him out of the shaft)
     run(g, 400, Input());
     run(g, 5, Input());
     CHECK(!g.player().alive, "falling below the world kills the bro");
@@ -320,11 +320,15 @@ int main(int argc, char **argv) {
             float ex_, ey_; int et;
             if (!g.debug_enemy(idx, ex_, ey_, et) || et != E_MOOK) continue;
             run(g, 3, Input());
+            g.debug_clear_enemies();
+            for (int k = 0; k < 8; k++) g.debug_add_enemy(E_MOOK, ex_ + float(k) * 3.0f, ey_, -1); // soldiers facing the bro: they have him in sight
             g.debug_teleport(ex_ - 40, ey_);
+            g.player().invuln = 100000;
+            for (int i = 0; i < 20; i++) { g.update(Input()); g.sounds.clear(); }
             g.player().invuln = 0;
             g.debug_explode(g.player().a.x, g.player().a.y - 7, 20, 16, false);
             int seen = 0;
-            for (int i = 0; i < 60; i++) { g.update(Input()); if (g.laughing_count() > 0) seen++; }
+            for (int i = 0; i < 140; i++) { g.update(Input()); if (g.laughing_count() > 0) seen++; }
             laughed = seen > 20;
         }
         CHECK(laughed, "after the bro dies, a nearby soldier laughs at him");
@@ -782,7 +786,7 @@ int main(int argc, char **argv) {
         shot(s, "13_missions_scrolled");
         s.set_state(GS_PLAY);
         for (int i = 0; i < NUM_LEVELS; i++) s.st.slots[2].mask |= 1 << i;
-        s.st.slots[2].used = 1; s.st.slots[2].broMask = 0xFFFFFFFFu;
+        s.st.slots[2].used = 1; s.st.slots[2].broMask = ~0ull;
         s.st.slots[3].used = 1; s.st.slots[3].mask = 0x0B;
         s.set_state(GS_SLOTS);
         shot(s, "13_slots_progress");
@@ -1024,14 +1028,15 @@ int main(int argc, char **argv) {
     // ---- 34. HUD face portraits for the whole roster ----
     {
         static u32 sheet[546 * 312];
+        for (int dead = 0; dead < 2; dead++)
         for (int half = 0; half < 3; half++) {
             for (size_t i = 0; i < 546 * 312; i++) sheet[i] = RGB(90, 150, 210);
             for (int b = half * 14; b < std::min(NUM_BROS, half * 14 + 14); b++) {
-                const Sprite &f = g.debug_face(b);
+                const Sprite &f = dead ? g.debug_face_dead(b) : g.debug_face(b);
                 int cx = ((b - half * 14) % 7) * 78, cy = ((b - half * 14) / 7) * 78;
                 for (int y = 0; y < f.h * 3; y++) for (int x = 0; x < f.w * 3; x++) { u32 c = f.at(x / 3, y / 3); if (c) sheet[size_t((cy + 3 + y) * 546 + cx + 3 + x)] = c; }
             }
-            std::string p = outdir + (half == 0 ? "/16_faces_a.png" : half == 1 ? "/16_faces_b.png" : "/16_faces_c.png");
+            std::string p = outdir + (dead ? (half == 0 ? "/16_dead_a.png" : half == 1 ? "/16_dead_b.png" : "/16_dead_c.png") : (half == 0 ? "/16_faces_a.png" : half == 1 ? "/16_faces_b.png" : "/16_faces_c.png"));
             write_png(p.c_str(), sheet, 546, 312);
         }
         bool distinct = true;
@@ -1298,7 +1303,7 @@ int main(int argc, char **argv) {
         for (int i = 0; i < 160; i++) g.update(rt);
         CHECK(g.player().alive && g.player().a.x > float((x0 + 12) * TS), "walking through spikes is harmless");
         g.player().invuln = 0;
-        g.debug_teleport(float((x0 + 8) * TS), float(gr * TS));
+        g.debug_teleport(float((x0 + 8) * TS), float(gr * TS)); g.player().a.vx = 0;
         run(g, 3, Input());
         Input jp; jp.jump = true;
         bool died = false;
@@ -1538,6 +1543,172 @@ int main(int argc, char **argv) {
         shot(g, "25_chainsaw", 4);
         for (int i = 0; i < 10; i++) g.update(Input());
         CHECK(g.saw_volume() == 0.0f, "the chainsaw sound stops when the trigger is released");
+    }
+
+    // ---- 49. machine gunner, softer soldiers, spikes vs soldiers, re-aiming delay, blast zones, crouching ----
+    {
+        int gr; int x0 = 100;
+        auto ebullets = [&]() { int n = 0; for (size_t i = 0; i < g.proj_count(); i++) { float vx, vy; int k; if (g.debug_proj(i, vx, vy, k) && k == PK_EBULLET) n++; } return n; };
+        // a. the gunner's salvo
+        stage(x0, 80, gr);
+        g.player().invuln = 100000;
+        g.debug_teleport(float((x0 + 8) * TS), float(gr * TS));
+        g.debug_add_enemy(E_GUNNER, float((x0 + 22) * TS), float(gr * TS), -1);
+        int most = 0;
+        for (int i = 0; i < 110; i++) { g.update(Input()); g.sounds.clear(); most = std::max(most, ebullets()); }
+        printf("machine gunner: up to %d rounds in flight\n", most);
+        CHECK(most >= 13 && most <= 17, "the machine gunner fires a salvo of about 15 rounds");
+        shot(g, "26_gunner", 4);
+        // b. soldiers die easily
+        stage(x0, 80, gr);
+        int hv = g.debug_add_enemy(E_HEAVY, float((x0 + 30) * TS), float(gr * TS), -1);
+        g.debug_hurt_enemy(hv, 1, C_BULLET);
+        CHECK(g.enemies_alive() == 1, "one small bullet does not kill a heavy soldier yet");
+        g.debug_hurt_enemy(hv, 1, C_BULLET);
+        CHECK(g.enemies_alive() == 0, "two small bullets kill a heavy soldier");
+        hv = g.debug_add_enemy(E_GUNNER, float((x0 + 30) * TS), float(gr * TS), -1);
+        g.debug_hurt_enemy(hv, 2, C_BULLET);
+        CHECK(g.enemies_alive() == 0, "one big-calibre round kills a machine gunner");
+        // c. spikes: walking is safe for a soldier too, landing on them kills
+        stage(x0, 80, gr);
+        for (int x = x0 + 34; x < x0 + 48; x++) g.debug_set_tile(x, gr - 1, T_SPIKE);
+        g.debug_teleport(float((x0 + 30) * TS), float(gr * TS));
+        g.debug_add_enemy(E_MOOK, float((x0 + 40) * TS + 4), float(gr * TS), -1);
+        for (int i = 0; i < 20; i++) { g.update(Input()); g.sounds.clear(); }
+        CHECK(g.enemies_alive() == 1, "a soldier standing on spikes is fine");
+        g.debug_add_enemy(E_MOOK, float((x0 + 40) * TS + 4), float(gr * TS - 50), -1);
+        for (int i = 0; i < 60; i++) { g.update(Input()); g.sounds.clear(); }
+        { float ex_, ey_; int et_; for (int q = 0; q < g.debug_enemy_count(); q++) if (g.debug_enemy(q, ex_, ey_, et_)) printf("enemy %d at %.1f,%.1f (ground row y=%d) spike below=%d\n", q, ex_, ey_, gr * TS, int(g.debug_tile(int(ex_ / TS), int((ey_ - 2) / TS)) == T_SPIKE)); }
+        CHECK(g.enemies_alive() == 1, "...but one who falls onto them dies");
+        // d. spotted again: he must re-aim before shooting
+        stage(x0, 120, gr);
+        g.player().invuln = 100000;
+        g.debug_teleport(float((x0 + 10) * TS), float(gr * TS));
+        g.debug_add_enemy(E_MOOK, float((x0 + 22) * TS), float(gr * TS), -1);
+        for (int i = 0; i < 200; i++) { g.update(Input()); g.sounds.clear(); }
+        g.debug_teleport(float((x0 + 100) * TS), float(gr * TS));
+        for (int i = 0; i < 172; i++) { g.update(Input()); g.sounds.clear(); } // away long enough for his shots to expire, short enough that he is still alert
+        g.debug_teleport(float((x0 + 10) * TS), float(gr * TS));
+        printf("bullets in flight when he sees you again: %d, enemies %d\n", ebullets(), g.enemies_alive());
+        int first = -1;
+        for (int i = 0; i < 200 && first < 0; i++) { g.update(Input()); g.sounds.clear(); if (ebullets() > 0) first = i; }
+        printf("soldier re-aims for %d ticks before shooting again\n", first);
+        CHECK(first >= 30 || first < 0, "a soldier who sees you again waits a moment before firing");
+        // e. blast zones
+        for (int z = 0; z < 3; z++) {
+            stage(x0, 80, gr);
+            g.player().invuln = 0;
+            float bx = float((x0 + 40) * TS), by = float(gr * TS) - 7;
+            float dist = z == 0 ? 8.0f : z == 1 ? 30.0f : 90.0f;
+            g.debug_teleport(bx + dist, float(gr * TS));
+            g.player().a.vx = 0;
+            g.debug_explode(bx, by, 24, 14, false);
+            if (z == 0) CHECK(!g.player().alive, "right next to a blast: dead");
+            else if (z == 1) CHECK(g.player().alive && g.player().a.vx > 1.5f && g.player().knockT > 0, "in the outer zone of a blast: thrown away, not killed");
+            else CHECK(g.player().alive && g.player().a.vx == 0.0f, "far from a blast: untouched");
+        }
+        // f. crouching
+        stage(x0, 80, gr);
+        g.player().invuln = 100000;
+        run(g, 5, Input());
+        Input dn; dn.down = true;
+        for (int i = 0; i < 5; i++) g.update(dn);
+        CHECK(g.player().crouch, "holding down on the ground crouches");
+        shot(g, "27_crouch", 4);
+        run(g, 5, Input());
+        CHECK(!g.player().crouch, "releasing down stands up again");
+    }
+
+    // ---- 50. own blasts throw you, steeper wall jump with up, punch for blade fighters, ammo box message ----
+    {
+        int gr; int x0 = 100;
+        // a. your own explosion: harmless, but it throws you when you stand too close
+        stage(x0, 80, gr);
+        g.player().invuln = 0;
+        float bx = float((x0 + 40) * TS), by = float(gr * TS) - 7;
+        g.debug_teleport(bx + 6, float(gr * TS));
+        g.player().a.vx = 0;
+        g.debug_explode(bx, by, 24, 14, true);
+        CHECK(g.player().alive && g.player().a.vx > 1.5f && g.player().knockT > 0, "your own blast throws you when you are right next to it (no damage)");
+        stage(x0, 80, gr);
+        g.player().invuln = 0;
+        g.debug_teleport(bx + 90, float(gr * TS));
+        g.player().a.vx = 0;
+        g.debug_explode(bx, by, 24, 14, true);
+        CHECK(g.player().alive && g.player().a.vx == 0.0f, "...and leaves you alone from afar");
+        // b. wall jump: holding up gives a steeper jump
+        float vyUp = 0, vyFlat = 0, vxUp = 0, vxFlat = 0;
+        for (int k = 0; k < 2; k++) {
+            stage(x0, 80, gr);
+            for (int y = gr - 14; y < gr; y++) g.debug_set_tile(x0 + 20, y, T_METAL);
+            g.player().invuln = 100000;
+            g.debug_teleport(float((x0 + 20) * TS) - 4.5f, float(gr * TS) - 40);
+            g.player().a.vy = 0;
+            Input w; w.right = true; w.up = k == 0;
+            for (int i = 0; i < 10; i++) g.update(w); // let the ground-jump grace expire: he slides down the wall
+            w.jump = true;
+            g.update(w);
+            if (k == 0) { vyUp = g.player().a.vy; vxUp = g.player().a.vx; } else { vyFlat = g.player().a.vy; vxFlat = g.player().a.vx; }
+        }
+        printf("wall jump: with up vy=%.2f vx=%.2f, without vy=%.2f vx=%.2f\n", vyUp, vxUp, vyFlat, vxFlat);
+        CHECK(vyUp < vyFlat - 0.3f && fabsf(vxUp) < fabsf(vxFlat), "holding up when wall-jumping gives a steeper jump");
+        // c. punching with a blade fighter
+        int blade = -1; for (int b = 0; b < NUM_BROS; b++) if (BROS[b].prim == P_KATANA) { blade = b; break; }
+        stage(x0, 80, gr);
+        g.player().bro = blade; g.player().cool = 0; g.player().a.face = 1;
+        Input y; y.melee = true;
+        g.update(y);
+        CHECK(g.player().punchT > 0 && g.player().meleeT == 0, "a katana bro throws a punch with Y (no sword swing)");
+        shot(g, "28_blade_punch", 4);
+        // d. ammo box: message when the special is already full, box stays
+        stage(x0, 80, gr);
+        g.player().bro = 0; g.player().spec = BROS[0].specAmmo;
+        g.debug_teleport(float((x0 + 10) * TS), float(gr * TS));
+        g.debug_add_prop(PR_AMMO, float((x0 + 10) * TS), float(gr * TS));
+        int before = g.ammo_props();
+        g.update(Input());
+        CHECK(g.toast_ticks() > 0 && g.ammo_props() == before, "walking onto an ammo box with full ammo shows a message and leaves the box");
+        g.player().spec = 0;
+        g.toast_ticks();
+        g.update(Input());
+        CHECK(g.player().spec == BROS[0].specAmmo && g.ammo_props() == before - 1, "...and with room left the box is used");
+    }
+
+    // ---- 51. new bros: cryo gun, stakes, laughing only from soldiers who saw him, dead faces ----
+    {
+        int gr; int x0 = 100;
+        int cryo = -1, stakes = -1;
+        for (int b = 0; b < NUM_BROS; b++) { if (BROS[b].prim == P_CRYO) cryo = b; if (!strcmp(BROS[b].primName, "WOODEN STAKES")) stakes = b; }
+        CHECK(NUM_BROS >= 35 && cryo > 0 && stakes > 0, "Broheart, Bronan, Broffy and Demolition Bro joined the roster");
+        stage(x0, 80, gr);
+        g.player().bro = cryo; g.player().cool = 0; g.player().a.face = 1;
+        g.debug_teleport(float((x0 + 10) * TS), float(gr * TS));
+        int mk = g.debug_add_enemy(E_MOOK, float((x0 + 22) * TS), float(gr * TS), 1);
+        Input fi; fi.fire = true;
+        for (int i = 0; i < 40; i++) { g.update(fi); g.sounds.clear(); }
+        CHECK(g.enemies_alive() == 1 && g.debug_frozen(mk), "the cryo gun freezes a soldier solid instead of killing him");
+        float fx0, fy0; int ft;
+        g.debug_enemy(mk, fx0, fy0, ft);
+        for (int i = 0; i < 60; i++) { g.update(Input()); g.sounds.clear(); }
+        float fx1, fy1;
+        g.debug_enemy(mk, fx1, fy1, ft);
+        CHECK(g.debug_frozen(mk) && fabsf(fx1 - fx0) < 0.5f, "a frozen soldier stays put");
+        g.debug_hurt_enemy(mk, 1, C_BULLET);
+        CHECK(g.enemies_alive() == 0, "any hit shatters a frozen soldier");
+        // soldiers who never saw the bro do not laugh when he dies
+        stage(x0, 80, gr);
+        g.player().invuln = 100000;
+        g.debug_teleport(float((x0 + 10) * TS), float(gr * TS));
+        for (int k = 0; k < 8; k++) g.debug_add_enemy(E_MOOK, float((x0 + 22 + k) * TS), float(gr * TS), 1); // facing away
+        g.player().invuln = 0;
+        g.debug_explode(g.player().a.x, g.player().a.y - 7, 20, 16, false);
+        int laughs = 0;
+        for (int i = 0; i < 100; i++) { g.update(Input()); g.sounds.clear(); laughs = std::max(laughs, g.laughing_count()); }
+        CHECK(laughs == 0, "soldiers who did not have the bro in sight do not laugh");
+        // dead faces differ from live ones
+        bool alldiff = true;
+        for (int b = 0; b < NUM_BROS; b++) if (g.debug_face(b).d == g.debug_face_dead(b).d) alldiff = false;
+        CHECK(alldiff, "every bro has a dead face of his own");
     }
 
     // 17. portrait HUD screenshot

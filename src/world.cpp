@@ -71,9 +71,10 @@ void Game::add_mook(float x, float y, int type) {
     e.a.y = y;
     e.a.w = BW;
     e.a.h = BH;
-    e.hp = type == E_HEAVY ? 6 : 1;
+    e.hp = (type == E_HEAVY || type == E_GUNNER) ? 2 : 1; // a big round or two small ones
     if (type == E_OFFICER) { e.dir = -1; }
     if (type == E_DOG) { e.a.w = 12; e.a.h = 8; }
+    if (type == E_GUNNER) { e.a.w = BW + 2; e.a.h = BH + 2; }
     e.dir = rnd() < 0.5f ? -1 : 1;
     e.a.face = e.dir;
     e.timer = rndi(0, 60);
@@ -149,7 +150,7 @@ void Game::stamp_fort(int x0, int g, int w) {
         for (int k = 0; k < 2; k++) set_tile(x0 + w - 1 - k, y, T_AIR);
     set_tile(x0 + 3, g - 1, T_BARREL);
     set_tile(x0 + 4, g - 1, T_BARREL);
-    add_mook(float((x0 + w / 2) * TS), float(g * TS), E_HEAVY);
+    add_mook(float((x0 + w / 2) * TS), float(g * TS), rnd() < 0.5f ? E_GUNNER : E_HEAVY);
     add_mook(float((x0 + w - 5) * TS), float(g * TS), E_MOOK);
     add_prop(PR_AMMO, float((x0 + 6) * TS), float(g * TS));
 }
@@ -167,7 +168,8 @@ static int pick_enemy(int lvl, float r) {
     };
     static const int ty[5] = {E_MOOK, E_BOMBER, E_HEAVY, E_RPG, E_DOG};
     float acc = 0;
-    for (int i = 0; i < 5; i++) { acc += wt[lvl % NUM_WORLDS][i]; if (r < acc) return ty[i]; }
+    static const float gunnerShare[NUM_WORLDS] = {0.06f, 0.10f, 0.12f, 0.12f, 0.15f, 0.10f}; // part of the plain soldiers who are machine gunners
+    for (int i = 0; i < 5; i++) { acc += wt[lvl % NUM_WORLDS][i]; if (r < acc) return (i == 0 && r < wt[lvl % NUM_WORLDS][0] * gunnerShare[lvl % NUM_WORLDS]) ? int(E_GUNNER) : ty[i]; }
     return E_MOOK;
 }
 
@@ -604,6 +606,9 @@ void Game::add_trauma(float x, float y, float power) {
 
 void Game::explode(float x, float y, float r, float power, bool friendly, bool shell) { pend.push_back({x, y, r, power, friendly, 0, shell}); }
 
+// how close you have to be to be killed outright: grows with the radius and, more so, with the power of the blast
+float Game::blast_lethal(float r, float power) const { return r * (0.4f + power / 50.0f); }
+
 void Game::process_explosions() {
     // chain reactions: explosions can carry a delay, so a row of crates goes off one after another
     std::vector<PendExpl> cur;
@@ -668,13 +673,31 @@ void Game::process_explosions() {
             float d = sqrtf(dx * dx + dy * dy);
             float reach = ex.r + 4 + (e.type == E_BOSS ? 16.0f : 0.0f);
             if (d < reach) {
-                if (e.type == E_HEAVY || e.type == E_BOSS) hurt_enemy(int(i), std::max(1, int(ex.power / 3 * (1.0f - d / reach) + 0.5f)), dx, C_EXPLOSION);
-                else kill_enemy(int(i), dx, C_EXPLOSION);
+                float lethal = blast_lethal(ex.r, ex.power) + 4;
+                if (e.type == E_BOSS) hurt_enemy(int(i), std::max(1, int(ex.power / 3 * (1.0f - d / reach) + 0.5f)), dx, C_EXPLOSION);
+                else if (d < lethal || e.type == E_BOMBER) kill_enemy(int(i), dx, C_EXPLOSION); // close: dead. (a kamikaze catches alight)
+                else { // further out the blast only throws him, and the harder the closer he stands
+                    float k = 1.0f - (d - lethal) / std::max(1.0f, reach - lethal);
+                    e.stun = 20 + int(25.0f * k);
+                    e.a.vx = (dx >= 0 ? 1.0f : -1.0f) * (1.2f + 3.0f * k);
+                    e.a.vy = -(1.8f + 2.2f * k);
+                    e.a.ground = false;
+                    if (e.type == E_HEAVY || e.type == E_GUNNER) hurt_enemy(int(i), 1, dx, C_EXPLOSION);
+                }
             }
         }
-        if (pl.alive && pl.invuln == 0 && !pl.remote && !ex.friendly) { // your own blasts never hurt you
+        if (pl.alive && !pl.remote && !pl.ride && (ex.friendly || pl.invuln == 0)) { // your own blasts never hurt you, but they throw you if you stand too close
             float dx = pl.a.x - ex.x, dy = pl.a.y - 7 - ex.y;
-            if (sqrtf(dx * dx + dy * dy) < ex.r * 0.85f + 3) kill_player(1, dx);
+            float d = sqrtf(dx * dx + dy * dy), lethal = blast_lethal(ex.r, ex.power) + 3, outer = lethal + ex.r * 0.6f + 10.0f;
+            if (d < lethal && !ex.friendly) kill_player(1, dx);
+            else if (d < outer) { // thrown by the blast: harder the closer he stands, no steering for a moment
+                float k = d < lethal ? 1.0f : 1.0f - (d - lethal) / (outer - lethal);
+                pl.a.vx = (dx >= 0 ? 1.0f : -1.0f) * (1.4f + 3.2f * k);
+                pl.a.vy = -(1.6f + 2.4f * k);
+                pl.a.ground = false;
+                pl.knockT = 10 + int(16.0f * k);
+                pl.crouch = false;
+            }
         }
         for (Prop &p : props) {
             if (p.type != PR_CAGE || p.used) continue;

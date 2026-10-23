@@ -33,10 +33,14 @@ const BroDef BROS[NUM_BROS] = {
     {"BRONDLE FLY",     C(150,100,70),  C(30,25,20),   C(60,90,200),  C(70,130,80),   C(60,70,100),   C(240,230,120),C(70,70,75),   1, P_MG,       S_TURKEY,    3, "BERETTA", "BANANA BOMB"},
     {"TELEBROPORTER",   C(235,185,135), C(60,50,40),   C(40,170,225), C(235,235,245), C(60,60,85),    C(120,200,240),C(100,110,130),6, P_BURST,    S_TELEPORT,  4, "LASER BURST", "TELEPORT"},
     {"BRO MAX",         C(215,165,120), C(80,55,35),   C(80,55,35),   C(55,45,45),    C(65,55,45),    C(200,55,45),  C(90,90,95),   5, P_SHOTGUN,  S_ADRENALINE,2, "SAWED-OFF", "V8 RAGE"},
-    {"THE BROFESSIONAL",C(235,185,135), C(50,40,40),   C(40,40,55),   C(60,60,72),    C(50,50,62),    C(150,160,175),C(40,40,45),   0, P_DUAL,     S_LOCKON,    3, "SILENCED PISTOL", "COLD BLOOD"},
+    {"THE BROFESSIONAL",C(235,185,135), C(50,40,40),   C(14,14,18),   C(60,60,72),    C(50,50,62),    C(150,160,175),C(40,40,45),   6, P_DUAL,     S_LOCKON,    3, "SILENCED PISTOL", "COLD BLOOD"},
     {"XENA",            C(235,185,135), C(40,28,22),   C(190,140,50), C(176,128,50),  C(120,70,40),   C(220,200,120),C(190,190,200),5, P_CHAKRAM,  S_WARCRY,    3, "CHAKRAM", "WAR CRY"},
     {"BRO WICK",        C(235,185,135), C(35,28,25),   C(35,35,45),   C(28,28,34),    C(28,28,34),    C(240,240,240),C(20,20,24),   5, P_DUAL,     S_DASH,      3, "DUAL PISTOLS", "TACTICAL ROLL"},
     {"ROCKY BROLBOA",   C(225,170,125), C(40,30,25),   C(200,30,30),  C(200,30,30),   C(240,240,240), C(240,200,40), C(200,30,30),  0, P_FIST,     S_ADRENALINE,2, "BOXING GLOVES", "EYE OF THE TIGER"},
+    {"BROHEART",        C(225,180,140), C(120,80,42),  C(50,100,190), C(170,150,112), C(70,100,60),   C(50,100,190), C(200,210,220),5, P_KATANA,    S_WARCRY,    3, "CLAYMORE", "FREEDOM!"},
+    {"BRONAN THE BROBARIAN",C(205,150,105),C(28,22,20),C(120,88,50),  C(140,98,58),   C(90,62,40),    C(200,170,60), C(190,195,205),5, P_KATANA,    S_ADRENALINE,2, "GREAT SWORD", "BERSERK"},
+    {"BROFFY THE VAMPIRE SLAYER",C(242,206,176),C(236,208,112),C(236,208,112),C(112,70,150),C(40,40,52),C(200,60,80), C(150,100,52),5, P_SPEAR,     S_MOLOTOV,   3, "WOODEN STAKES", "HOLY WATER"},
+    {"DEMOLITION BRO",  C(225,180,140), C(238,228,150),C(238,228,150),C(190,92,42),   C(50,55,72),    C(120,200,230),C(110,170,215),9, P_CRYO,      S_GRENADE,   4, "CRYO GUN", "C4 CHARGE"},
 };
 
 static const Theme THEMES[NUM_WORLDS] = {
@@ -85,7 +89,7 @@ static Sprite outline(const Sprite &s, u32 col) {
 }
 
 // 12x12 character, facing right. 5 head rows (per head variant) + 7 body rows (per frame).
-static const char *HEADS[9][5] = {
+static const char *HEADS[10][5] = {
     {"....rrrr....", "..hhhhhhh...", "....sssse...", "....sssss...", ".....ss....."}, // headband
     {"....hhhh....", "..hhhhhhhh..", "....sssse...", "....sssss...", ".....ss....."}, // hat
     {"....hhhh....", "...hhhhhh...", "...hssssse..", "....sssss...", ".....ss....."}, // helmet
@@ -95,6 +99,7 @@ static const char *HEADS[9][5] = {
     {"....rrrr....", "....ssss....", "....hhhhh...", "....sssss...", ".....ss....."}, // shades
     {"...hhhhhh...", "..hhxxxxhhh.", "....sssse...", "....sssss...", ".....ss....."}, // officer peaked cap
     {"....hhhh....", "...hhhhhh...", "...hhhhhh...", "...hxxxxh...", ".....ss....."}, // sack over the head, tied with a rope
+    {"....rrrr....", "...rrrrrr...", "...rsssse...", "....sssss...", ".....ss....."}, // short cropped hair
 };
 static const char *BODIES[4][7] = {
     {"...bbbbbb...", "..sbbbbbggg.", "..sbbbbbbg..", "...xxxxxx...", "...pppppp...", "...pp..pp...", "..kkk..kkk.."}, // idle
@@ -103,7 +108,7 @@ static const char *BODIES[4][7] = {
     {"...bbbbbb...", "..sbbbbbggg.", "..sbbbbbbg..", "...xxxxxx...", "...pppppp...", "..pp..pp....", "..kk..kk...."}, // jump
 };
 
-static Sprite build_char(int head, u32 skin, u32 hair, u32 acc, u32 shirt, u32 pants, u32 extra, u32 gun, int frame) {
+static Sprite build_char(int head, u32 skin, u32 hair, u32 acc, u32 shirt, u32 pants, u32 extra, u32 gun, int frame, int N = 16) {
     const char *rows[12];
     for (int i = 0; i < 5; i++) rows[i] = HEADS[head][i];
     for (int i = 0; i < 7; i++) rows[5 + i] = BODIES[frame][i];
@@ -112,10 +117,10 @@ static Sprite build_char(int head, u32 skin, u32 hair, u32 acc, u32 shirt, u32 p
     Sprite small = make_sprite(rows, 12, 12, pal, 9);
     // upscale 12x12 -> 16x16 (nearest neighbour, 3 of every 4 source pixels kept once, 1 doubled)
     Sprite big;
-    big.w = big.h = 16;
-    big.d.assign(256, 0);
-    for (int y = 0; y < 16; y++)
-        for (int x = 0; x < 16; x++) big.d[size_t(y * 16 + x)] = small.at(x * 12 / 16, y * 12 / 16);
+    big.w = big.h = N;
+    big.d.assign(size_t(N * N), 0);
+    for (int y = 0; y < N; y++)
+        for (int x = 0; x < N; x++) big.d[size_t(y * N + x)] = small.at(x * 12 / N, y * 12 / N);
     return outline(big, RGB(20, 14, 16));
 }
 
@@ -135,7 +140,7 @@ static Sprite build_dog(int frame) {
 }
 
 // Face portrait (24x24) for the HUD: a drawn face with eyes, brows, nose, mouth, headgear and per-bro details
-static Sprite build_face(const BroDef &d) {
+static Sprite build_face(const BroDef &d, bool dead) {
     const int N = 24;
     Sprite s;
     s.w = s.h = N;
@@ -147,6 +152,11 @@ static Sprite build_face(const BroDef &d) {
     u32 skin = d.skin, skinD = shade(skin, -30), skinL = shade(skin, 20), skinDD = shade(skin, -55);
     u32 hair = d.hair, hairD = shade(hair, -32), hairL = shade(hair, 38);
     u32 acc = d.acc, accD = shade(acc, -45), accL = shade(acc, 45);
+    bool covered = false; // eyes hidden behind a visor / shades (dead face: cracked lens instead of crossed-out eyes)
+    auto lerp_rgb = [](u32 a, u32 b, float t) {
+        int r = int((1 - t) * float((a >> 16) & 255) + t * float((b >> 16) & 255)), g = int((1 - t) * float((a >> 8) & 255) + t * float((b >> 8) & 255)), bl = int((1 - t) * float(a & 255) + t * float(b & 255));
+        return RGB(r, g, bl);
+    };
     auto in_ellipse = [](int x, int y, float cx, float cy, float rx, float ry) {
         float dx = (float(x) + 0.5f - cx) / rx, dy = (float(y) + 0.5f - cy) / ry;
         return dx * dx + dy * dy <= 1.0f;
@@ -166,21 +176,39 @@ static Sprite build_face(const BroDef &d) {
     for (int x = 8; x <= 15; x++) if (in_ellipse(x, 19, 12.0f, 12.4f, 7.7f, 8.6f)) px(x, 19, skinD); // chin shadow
     rect(3, 11, 3, 15, skinD); rect(20, 11, 20, 15, skinD);          // ears
     px(3, 12, skinDD); px(20, 12, skinDD);
-    // eyes (looking slightly to the side), brows, nose, mouth
+    // skin modelling: forehead light, temples and cheekbone shadow, blush, eye sockets
+    px(10, 5, skinL); px(11, 5, skinL); px(9, 6, skinL); px(10, 6, skinL);
+    px(6, 9, skinD); px(17, 9, skinD); px(6, 10, skinD); px(17, 10, skinD);
+    u32 blush = lerp_rgb(skin, RGB(215, 90, 90), 0.22f);
+    px(7, 16, blush); px(8, 16, blush); px(16, 16, shade(blush, -12)); px(15, 16, shade(blush, -12));
+    // eyes (looking slightly to the side): lid crease, white, iris with a catch-light, lower lid
+    int lum = int(((skin >> 16) & 255) + ((skin >> 8) & 255) + (skin & 255)) / 3, hlum = int(((hair >> 16) & 255) + ((hair >> 8) & 255) + (hair & 255)) / 3;
+    u32 iris = lum < 140 ? RGB(60, 40, 28) : hlum > 160 ? RGB(78, 126, 178) : RGB(96, 66, 40);
+    const u32 eyeW = RGB(236, 236, 242);
     for (int e = 0; e < 2; e++) {
         int ex = e ? 14 : 8;
-        rect(ex, 12, ex + 2, 13, white);
-        rect(ex + 2, 12, ex + 2, 13, dk);
-        px(ex + 1, 12, RGB(70, 110, 160));
-        rect(ex, 14, ex + 2, 14, skinD);
+        rect(ex - 1, 11, ex + 3, 11, skinD);                           // lid crease / eye socket
+        rect(ex, 12, ex + 2, 13, eyeW);
+        px(ex + 1, 12, iris); px(ex + 2, 12, iris); px(ex + 1, 13, iris); px(ex + 2, 13, dk);
+        px(ex + 1, 12, shade(iris, 40));                               // catch-light
+        rect(ex, 12, ex + 2, 12, shade(dk, 0)); px(ex + 1, 12, shade(iris, 40)); px(ex + 2, 12, iris); // lid line over the eye
+        rect(ex, 14, ex + 2, 14, skinD);                               // lower lid / bag
+        rect(ex - 1, 9, ex + 3, 9, hairD);                             // brow, thick
         rect(ex, 10, ex + 2, 10, hairD);
-        px(e ? ex : ex + 2, 11, hairD);                                // slightly angry brows
+        px(e ? ex - 1 : ex + 3, 9, skinD);                             // brow tapers outwards
     }
-    rect(12, 13, 12, 16, skinD); px(11, 16, skinD); px(12, 15, skinL);
-    rect(10, 18, 14, 18, RGB(110, 45, 45));
-    rect(10, 18, 13, 18, dk);
-    px(14, 17, dk);                                                      // smirk
-    px(9, 18, skinD);
+    // nose: highlighted bridge, shadowed side, nostrils
+    rect(12, 12, 12, 15, skinD); px(11, 14, skinL); px(11, 15, skinL); px(12, 16, skinDD); px(11, 16, skinD); px(13, 16, skinDD);
+    // mouth: upper lip darker, lower lip fuller, shadow under it, small smirk
+    u32 lipD = lerp_rgb(skinD, RGB(150, 60, 60), 0.5f), lipL = lerp_rgb(skin, RGB(190, 85, 85), 0.45f);
+    rect(10, 17, 13, 17, lipD);
+    rect(10, 18, 14, 18, RGB(80, 30, 32));
+    rect(10, 19, 13, 19, lipL);
+    px(14, 17, dk); px(9, 18, skinD); px(15, 18, skinD);
+    rect(10, 20, 13, 20, skinD);                                        // shadow under the lower lip
+    px(8, 18, shade(skin, -14)); px(16, 18, shade(skin, -24));          // cheek creases
+    rect(3, 11, 3, 15, skinD); rect(20, 11, 20, 15, skinD);              // ears
+    px(3, 12, skinDD); px(20, 12, skinDD); px(3, 14, skinL);
     // headgear by style
     auto dome = [&](int ymax, u32 c, u32 hl) {
         for (int y = 1; y <= ymax; y++)
@@ -220,11 +248,28 @@ static Sprite build_face(const BroDef &d) {
         rect(6, 8, 17, 9, hair); px(12, 6, hairD); px(12, 7, hairD); px(11, 8, hairD); px(13, 9, hairD); px(8, 9, skin); px(15, 9, skin);
         break;
     case 6: // shades
+        covered = true;
         dome(7, hair, hairL);
+        if (is("THE BROFESSIONAL")) { // small round black glasses (Leon)
+            covered = true;
+            px(6, 8, hair); px(17, 8, hair); px(6, 9, hair); px(17, 9, hair);
+            rect(7, 11, 10, 13, dk); rect(13, 11, 16, 13, dk);                      // lenses
+            px(7, 11, RGB(40, 40, 50)); px(10, 11, RGB(40, 40, 50)); px(7, 13, RGB(40, 40, 50)); px(10, 13, RGB(40, 40, 50)); // rounded corners
+            px(13, 11, RGB(40, 40, 50)); px(16, 11, RGB(40, 40, 50)); px(13, 13, RGB(40, 40, 50)); px(16, 13, RGB(40, 40, 50));
+            px(8, 12, RGB(110, 120, 140)); px(14, 12, RGB(110, 120, 140));          // glints
+            rect(11, 11, 12, 11, dk);                                                // bridge
+            rect(5, 11, 6, 11, dk); rect(17, 11, 18, 11, dk);                        // arms
+            break;
+        }
         px(6, 8, hair); px(17, 8, hair); px(6, 9, hair); px(17, 9, hair);
         rect(7, 11, 11, 13, dk); rect(13, 11, 17, 13, dk); rect(12, 11, 12, 11, dk);
         rect(5, 11, 6, 11, dk); rect(18, 11, 19, 11, dk);
         px(8, 11, RGB(150, 170, 200)); px(9, 11, RGB(90, 110, 140)); px(14, 11, RGB(150, 170, 200)); px(15, 11, RGB(90, 110, 140));
+        break;
+    case 9: // short cropped hair
+        dome(5, hair, hairL);
+        rect(5, 6, 18, 6, hair); rect(4, 8, 5, 9, hairD); rect(18, 8, 19, 9, hairD);   // hairline, sideburns
+        px(9, 5, hairL); px(10, 4, hairL);
         break;
     case 7: // peaked officer cap with a badge
         rect(6, 1, 17, 5, acc); rect(6, 1, 17, 1, accL);
@@ -265,6 +310,7 @@ static Sprite build_face(const BroDef &d) {
         rect(12, 3, 12, 12, RGB(60, 62, 70));
     }
     if (is("BROBOCOP") || is("BRO DREDD")) { // visor over the eyes
+        covered = true;
         u32 vis = is("BROBOCOP") ? RGB(15, 20, 30) : RGB(20, 25, 60);
         rect(6, 10, 17, 14, vis); rect(7, 10, 16, 10, shade(vis, 28));
         px(8, 11, RGB(110, 160, 220)); px(9, 11, RGB(70, 110, 170));
@@ -274,7 +320,55 @@ static Sprite build_face(const BroDef &d) {
     if (is("BRO CAESAR")) { for (int i = 0; i < 8; i++) { px(4 + i * 2, 7 + (i % 2), acc); px(5 + i * 2, 7 + (i % 2), accL); } }
     if (is("BLADE BRO")) { px(10, 12, RGB(200, 40, 40)); px(15, 12, RGB(200, 40, 40)); }
     if (is("BRO IN BLACK")) { rect(4, 20, 19, 21, white); rect(11, 21, 12, 23, RGB(30, 30, 38)); } // white shirt collar and tie
+    if (is("BROHEART")) { // woad war paint: a band over the eyes and stripes down the cheeks, wild beard stubble
+        u32 woad = RGB(52, 104, 196);
+        rect(5, 10, 18, 11, woad); rect(6, 12, 7, 14, woad); rect(16, 12, 17, 14, woad);
+        for (int k = 0; k < 3; k++) { rect(7 + k * 0 + 0, 15 + k, 8, 15 + k, woad); rect(15, 15 + k, 16, 15 + k, woad); }
+        rect(5, 10, 18, 10, shade(woad, 30));
+        px(9, 12, eyeW); px(15, 12, eyeW);
+        stubble(shade(hair, -20), 4);
+    }
+    if (is("BRONAN THE BROBARIAN")) { // thick brow, iron-hard jaw, full black beard, battle scar, leather headband
+        rect(4, 8, 19, 9, d.acc); rect(4, 8, 19, 8, accL); rect(4, 9, 19, 9, accD);
+        rect(7, 10, 10, 10, hairD); rect(13, 10, 16, 10, hairD);
+        for (int y = 16; y <= 21; y++) for (int x = 6; x <= 17; x++) if (in_ellipse(x, y, 12.0f, 12.4f, 7.7f, 8.6f) && !(x >= 10 && x <= 13 && y == 18)) px(x, y, ((x * 3 + y) % 3) ? hair : hairD);
+        rect(10, 18, 13, 18, RGB(80, 30, 32));
+        px(8, 11, RGB(215, 170, 150)); px(9, 12, RGB(215, 170, 150)); px(10, 13, RGB(215, 170, 150)); // scar
+    }
+    if (is("BROFFY THE VAMPIRE SLAYER")) { // red lips, lashes, a small gold cross at the neck
+        rect(10, 17, 13, 17, RGB(176, 52, 66)); rect(10, 19, 13, 19, RGB(206, 76, 88)); rect(10, 18, 14, 18, RGB(120, 36, 46));
+        px(7, 12, dk); px(9, 11, dk); px(15, 11, dk); px(17, 12, dk);
+        rect(12, 21, 12, 23, RGB(240, 210, 80)); rect(11, 22, 13, 22, RGB(240, 210, 80));
+        px(7, 16, RGB(235, 140, 140)); px(16, 16, RGB(225, 130, 130));
+    }
+    if (is("DEMOLITION BRO")) { // cold pale eyes, square jaw, a scar across the chin, a trace of stubble
+        px(9, 12, RGB(150, 200, 235)); px(10, 12, RGB(110, 160, 205)); px(15, 12, RGB(150, 200, 235)); px(16, 12, RGB(110, 160, 205));
+        rect(14, 19, 16, 20, skinD); px(15, 19, RGB(215, 160, 150)); px(16, 20, RGB(215, 160, 150));
+        stubble(shade(hair, -60), 9);
+    }
     px(8, 9, skinL);
+    if (dead) {
+        // pale, greyish-green skin
+        auto pale = [&](u32 c) { return lerp_rgb(c, RGB(150, 165, 150), 0.5f); };
+        const u32 skinSet[4] = {skin, skinD, skinL, skinDD};
+        for (int y = 0; y < N; y++) for (int x = 0; x < N; x++) { u32 c = s.at(x, y); for (int k = 0; k < 4; k++) if (c == skinSet[k]) px(x, y, pale(c)); }
+        u32 ps = pale(skin), blood = RGB(170, 18, 22), bloodD = RGB(110, 8, 12);
+        if (!covered) {
+            for (int e = 0; e < 2; e++) { // crossed-out eyes
+                int ex = e ? 14 : 8;
+                rect(ex - 1, 11, ex + 3, 14, ps);
+                rect(ex - 1, 11, ex + 3, 11, pale(skinD));
+                px(ex, 12, dk); px(ex + 2, 12, dk); px(ex + 1, 13, dk); px(ex, 14, dk); px(ex + 2, 14, dk);
+            }
+        } else { rect(6, 10, 17, 10, dk); for (int k = 0; k < 6; k++) px(9 + k, 11 + k / 2 * 0 + (k % 3), RGB(200, 210, 220)); } // cracked lens
+        rect(9, 17, 14, 20, RGB(70, 24, 30));                       // slack open mouth
+        rect(10, 17, 13, 17, RGB(235, 235, 235));                   // upper teeth
+        rect(11, 20, 13, 20, RGB(196, 88, 100));                    // tongue
+        rect(14, 19, 14, 22, blood); px(14, 23, bloodD);             // blood running from the mouth
+        rect(15, 6, 16, 7, bloodD); px(15, 6, blood);                // bullet hole in the forehead...
+        rect(16, 8, 16, 13, blood); px(16, 14, bloodD);              // ...and its trickle
+        px(11, 16, blood); px(11, 17, blood);                         // from the nose
+    }
     // dark rim so the face reads well on the blue backdrop
     Sprite out = s;
     for (int y = 0; y < N; y++)
@@ -294,7 +388,7 @@ void Game::build_sprites() {
             const BroDef &d = BROS[b];
             broSpr[b][f] = build_char(d.head, d.skin, d.hair, d.acc, d.shirt, d.pants, d.extra, d.gun, f);
         }
-    for (int b = 0; b < NUM_BROS; b++) broFace[b] = build_face(BROS[b]);
+    for (int b = 0; b < NUM_BROS; b++) { broFace[b] = build_face(BROS[b], false); broFaceDead[b] = build_face(BROS[b], true); }
     { // the captive: a sack over the head, ragged clothes, ropes around the body
         captiveSpr = build_char(8, C(225,180,135), C(60,50,40), C(176,148,98), C(128,122,112), C(98,92,84), C(150,118,70), 0, 0);
         u32 rope = C(176,140,80);
@@ -306,6 +400,7 @@ void Game::build_sprites() {
         enSpr[E_DOG][f] = build_dog(f);
         enSpr[E_RPG][f] = build_char(2, C(225,180,135), C(60,50,40), C(160,40,40), C(80,95,65), C(65,80,55), C(40,50,35), C(60,70,55), f);
         enSpr[E_OFFICER][f] = build_char(7, C(225,180,135), C(60,50,40), C(172,152,96), C(190,168,108), C(168,148,94), C(235,205,70), 0, f);
+        enSpr[E_GUNNER][f] = build_char(2, C(190,140,105), C(30,25,25), C(70,78,52), C(70,78,52), C(55,60,42), C(200,170,60), C(25,25,28), f, 18); // a bigger, bulkier man
         enSpr[E_HEAVY][f] = build_char(2, C(200,160,125), C(40,40,45), C(60,62,72), C(85,85,98), C(65,65,78), C(190,60,50), C(30,30,34), f);
     }
 }

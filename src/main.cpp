@@ -78,7 +78,8 @@ static void load_settings(Game &g) {
             else if (!strcmp(k + 3, "mask")) sl.mask = v;
             else if (!strcmp(k + 3, "kills")) sl.kills = v;
             else if (!strcmp(k + 3, "sec")) sl.seconds = v;
-            else if (!strcmp(k + 3, "bros")) sl.broMask = unsigned(v) | 1u;
+            else if (!strcmp(k + 3, "bros")) sl.broMask = (sl.broMask & ~0xFFFFFFFFull) | unsigned(v) | 1ull;
+            else if (!strcmp(k + 3, "bros2")) sl.broMask = (sl.broMask & 0xFFFFFFFFull) | ((unsigned long long)unsigned(v) << 32); // bros 32 and up
         }
     }
     fclose(f);
@@ -97,7 +98,7 @@ static void save_settings(const Game &g) {
     fprintf(f, "shake=%d\nvib=%d\nsfx=%d\nmusic=%d\nflip=%d\nslot=%d\n", g.st.shake, g.st.vib, g.st.sfx, g.st.music, g.st.flip ? 1 : 0, g.st.lastSlot);
     for (int i = 0; i < 4; i++) {
         const SaveSlot &sl = g.st.slots[i];
-        fprintf(f, "s%d_used=%d\ns%d_mask=%d\ns%d_kills=%d\ns%d_sec=%d\ns%d_bros=%d\n", i, sl.used, i, sl.mask, i, sl.kills, i, sl.seconds, i, int(sl.broMask));
+        fprintf(f, "s%d_used=%d\ns%d_mask=%d\ns%d_kills=%d\ns%d_sec=%d\ns%d_bros=%d\ns%d_bros2=%d\n", i, sl.used, i, sl.mask, i, sl.kills, i, sl.seconds, i, int(unsigned(sl.broMask & 0xFFFFFFFFull)), i, int(unsigned(sl.broMask >> 32)));
     }
     fclose(f);
 }

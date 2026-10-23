@@ -59,6 +59,7 @@ void Game::move_actor(Actor &a, float dx, float dy, bool step, bool *hitx) {
     for (int i = 0; i < n; i++) {
         if (!box_hits(a.x, a.y + sy, a.w, a.h)) { a.y += sy; continue; }
         if (sy > 0) {
+            a.impact = a.vy;
             a.ground = true;
             a.y = floorf((a.y + sy) / TS) * TS; // snap to the tile top
             if (box_hits(a.x, a.y, a.w, a.h)) a.y -= 0.01f;
@@ -159,6 +160,7 @@ void Game::spawn_player(bool first) {
     pl.a.h = BH;
     pl.alive = true;
     pl.invuln = 90;
+    for (Enemy &e : en) if (e.type != E_BOSS) { e.alert = 0; e.saw = false; e.cd = std::max(e.cd, 60); e.burstT = 0; if (e.type == E_GUNNER) e.aux = 0; } // reappearing: nobody remembers you, nobody shoots at once
     if (first) { queue.clear(); swap_bro(pick_owned()); }
     else swap_bro(old.bro);
     // respawn: drop from above the checkpoint
@@ -261,7 +263,7 @@ void Game::fire_primary(const Input &in) {
     const BroDef &b = BROS[p.bro];
     bool air = !p.a.ground;
     float ang = aim_angle(in, p.a.face, air);
-    float mx = p.a.x + cosf(ang) * 9, my = p.a.y - 9 + sinf(ang) * 9;
+    float mx = p.a.x + cosf(ang) * 9, my = p.a.y - (p.crouch ? 5.0f : 9.0f) + sinf(ang) * 9;
     auto spread = [&](float s) { return (rnd() - 0.5f) * 2 * s; };
     // spawn parallel to the aim axis, `off` pixels to the side (never diagonal)
     auto shot = [&](int kind, float off, float speed, int life, int dmg) {
@@ -293,13 +295,13 @@ void Game::fire_primary(const Input &in) {
     if (!held || p.cool > 0) return;
     switch (b.prim) {
     case P_MG:
-        shot(PK_BULLET, float(rndi(-1, 1)), 5.0f, 50, 1);
+        shot(PK_BULLET, float(rndi(-1, 1)), 5.0f, 50, gun_sfx(b) == SFX_POWERSHOT ? 2 : 1); // big calibre: one round kills a soldier
         p.cool = 7; trauma = std::min(1.0f, trauma + 0.012f);
         snd(gun_sfx(b), p.a.x, p.a.y);
         break;
     case P_BURST:
         if (p.burst <= 0) p.burst = 3;
-        shot(PK_BULLET, 0, 5.5f, 50, 1);
+        shot(PK_BULLET, 0, 5.5f, 50, gun_sfx(b) == SFX_POWERSHOT ? 2 : 1);
         snd(gun_sfx(b), p.a.x, p.a.y);
         trauma = std::min(1.0f, trauma + 0.012f);
         if (--p.burst <= 0) p.cool = 24; else p.cool = 3;
@@ -345,15 +347,17 @@ void Game::fire_primary(const Input &in) {
         snd(SFX_THROW, p.a.x, p.a.y);
         break;
     }
-    case P_KATANA:
+    case P_KATANA: {
         if (!fireEdge && p.meleeT > 0) return;
-        do_melee(22, 3, true);
-        p.meleeT = 10; p.cool = 16;
+        bool great = strcmp(b.primName, "GREAT SWORD") == 0, claymore = strcmp(b.primName, "CLAYMORE") == 0;
+        do_melee(great ? 30.0f : claymore ? 26.0f : 22.0f, great ? 5 : 3, true); // the great sword: huge reach, heavy blows, slower swing
+        p.meleeT = 10; p.cool = great ? 24 : 16;
         snd(SFX_SLASH, p.a.x, p.a.y);
         break;
+    }
     case P_FIST:
         do_melee(17, 2, true);
-        p.meleeT = 6; p.punchT = 8; p.cool = 9;
+        p.meleeT = 6; p.punchT = 8; p.punchMax = 8; p.cool = 9;
         snd(SFX_SLASH, p.a.x, p.a.y, 0.6f);
         break;
     case P_HOMING:
@@ -408,12 +412,19 @@ void Game::fire_primary(const Input &in) {
         trauma = std::min(1.0f, trauma + 0.01f);
         break;
     }
+    case P_CRYO: { // freezes soldiers solid: they stand helpless until any hit shatters them
+        shot(PK_CRYO, 0, 4.6f, 70, 0);
+        p.cool = 16;
+        snd(SFX_RAY, p.a.x, p.a.y, 0.8f);
+        break;
+    }
     case P_SPEAR: {
         if (!fireEdge) return;
-        Proj sp; sp.kind = PK_SPEAR; sp.x = mx; sp.y = my; sp.ang = ang; sp.vx = cosf(ang) * 5.2f; sp.vy = sinf(ang) * 5.2f;
-        sp.life = 50; sp.dmg = 3; sp.pierce = 3;
+        bool stake = strcmp(b.primName, "WOODEN STAKES") == 0; // Broffy: quick, light stakes
+        Proj sp; sp.kind = PK_SPEAR; sp.x = mx; sp.y = my; sp.ang = ang; sp.vx = cosf(ang) * (stake ? 6.0f : 5.2f); sp.vy = sinf(ang) * (stake ? 6.0f : 5.2f);
+        sp.life = stake ? 42 : 50; sp.dmg = stake ? 2 : 3; sp.pierce = stake ? 1 : 3;
         add_proj(sp);
-        p.cool = 22;
+        p.cool = stake ? 11 : 22;
         snd(SFX_THROW, p.a.x, p.a.y);
         break;
     }
@@ -528,6 +539,7 @@ void Game::use_special() {
 void Game::hurt_enemy(int i, int dmg, float dirx, int cause) {
     Enemy &e = en[size_t(i)];
     if (!e.alive) return;
+    if (e.frozen && e.type != E_BOSS) { e.frozen = false; dmg = 99; debris(e.a.x, e.a.y - 8, 14, RGB(190, 235, 255), 2.2f); snd(SFX_CRASH, e.a.x, e.a.y, 0.6f); } // an ice statue shatters
     if (e.type == E_BOSS) { dmg = boss_damage(e, dmg, cause); if (dmg <= 0) return; }
     e.hp -= dmg;
     e.flash = 4;
@@ -571,9 +583,9 @@ void Game::kill_enemy(int i, float dirx, int cause) {
         rumble = 1.0f;
         return;
     }
-    int n = e.type == E_HEAVY ? 90 : e.type == E_DOG ? 28 : 50;
+    int n = (e.type == E_HEAVY || e.type == E_GUNNER) ? 90 : e.type == E_DOG ? 28 : 50;
     gore(e.a.x, e.a.y - 8, n, dirx >= 0 ? 1.0f : -1.0f, RGB(200, 20, 20));
-    gibs(e.a.x, e.a.y - 8, e.type == E_HEAVY ? 8 : e.type == E_DOG ? 3 : 4, dirx >= 0 ? 1.0f : -1.0f);
+    gibs(e.a.x, e.a.y - 8, (e.type == E_HEAVY || e.type == E_GUNNER) ? 8 : e.type == E_DOG ? 3 : 4, dirx >= 0 ? 1.0f : -1.0f);
     if (e.type == E_BOMBER && (e.aux < 0 || bomberFuse > 0)) pend.push_back({e.a.x, e.a.y - 7, 24.0f, 12.0f, false, e.aux < 0 ? 0 : bomberFuse});
 }
 
@@ -605,6 +617,7 @@ void Game::update_player(const Input &in) {
     if (p.cloak > 0) p.cloak--;
     if (p.meleeT > 0) p.meleeT--;
     if (p.punchT > 0) p.punchT--;
+    if (toastT > 0) toastT--;
     if (flameT > 0) flameT--; if (sawT > 0) sawT--;
     if (p.whipT > 0) p.whipT--;
     if (p.reload > 0) p.reload--;
@@ -651,8 +664,12 @@ void Game::update_player(const Input &in) {
         p.lockLeft--;
     }
 
+    // crouching: hold down on the ground (can't stand up under a low ceiling)
+    if (in.down && p.a.ground && p.dashT == 0) p.crouch = true;
+    else if (p.crouch && (!in.down || !p.a.ground) && !box_hits(p.a.x, p.a.y - 1, p.a.w, BH - 1)) p.crouch = false;
     // horizontal control
     float maxv = p.adren > 0 ? 2.0f : 1.35f;
+    if (p.crouch) maxv *= 0.45f;
     if (p.wired) maxv *= 0.5f;
     if (b.prim == P_MINIGUN && in.fire) maxv = 0.55f;
     float acc = p.a.ground ? (world == 3 ? 0.07f : 0.22f) : 0.12f; // the arctic world is icy
@@ -673,6 +690,9 @@ void Game::update_player(const Input &in) {
             p.a.vx = std::max(-3.2f, std::min(3.2f, p.a.vx));
             p.a.vy = std::max(-3.2f, std::min(3.2f, p.a.vy));
         }
+    } else if (p.knockT > 0) {
+        p.knockT--; // thrown by a blast: no steering until he lands or the moment passes
+        p.a.vx *= 0.985f;
     } else if (dir != 0) {
         p.a.face = dir;
         p.a.vx += float(dir) * acc;
@@ -696,7 +716,9 @@ void Game::update_player(const Input &in) {
     if (p.jumpBuf > 0) {
         if (p.coyote > 0) { p.a.vy = p.wired ? -2.9f : -3.75f; p.jumpBuf = 0; p.coyote = 0; p.a.ground = false; snd(SFX_JUMP, p.a.x, p.a.y, 0.7f); }
         else if (p.wallT > 0) { // short grace window so wall-climbing doesn't need frame-perfect timing
-            p.a.vy = -3.6f; p.a.vx = float(-p.wallSide) * 1.3f; p.a.face = -p.wallSide;
+            if (in.up) { p.a.vy = -4.2f; p.a.vx = float(-p.wallSide) * 0.6f; } // holding up: a steeper jump, easier to climb a wall
+            else { p.a.vy = -3.6f; p.a.vx = float(-p.wallSide) * 1.3f; }
+            p.a.face = -p.wallSide;
             p.jumpBuf = 0; p.wall = 0; p.wallT = 0; snd(SFX_JUMP, p.a.x, p.a.y, 0.7f);
         }
     }
@@ -738,9 +760,9 @@ void Game::update_player(const Input &in) {
     if (b.prim != P_CHARGE && b.prim != P_MINIGUN && b.prim != P_REVOLVER && b.prim != P_DYNAMITE && b.prim != P_KATANA && b.prim != P_WHIP) {
         if (in.fire) fire_primary(in);
     } else fire_primary(in);
-    if (in.melee && !prev.melee && p.meleeT == 0) {
+    if (in.melee && !prev.melee && p.punchT == 0) { // Y: a punch (or a rifle butt) for everyone, blade fighters included
         do_melee(14, 2, true);
-        p.meleeT = 16; p.punchT = 10;
+        p.punchT = 10; p.punchMax = 10;
         snd(SFX_SLASH, p.a.x, p.a.y, 0.5f);
     }
     if (in.special && !prev.special) use_special();
@@ -778,7 +800,7 @@ void Game::update_enemies() {
         e.anim++;
         if (e.cd > 0) e.cd--;
         bool near_ = fabsf(e.a.x - (pl.alive ? pl.a.x : camX + VW / 2.0f)) < 420 && e.a.y < float(H * TS) + 100;
-        if (e.type != E_BOSS && !near_) continue;
+        if (e.type != E_BOSS && !near_) { e.alert = 0; e.saw = false; continue; } // out of sight, out of mind: he starts afresh when you come back
         if (e.type != E_BOSS && e.a.y > float(H * TS) + 40) { kill_enemy(int(i), 0, C_FALL); continue; }
 
         // mocking laughter after the bro dies
@@ -820,12 +842,26 @@ void Game::update_enemies() {
         }
 
         // hazards
-        if (e.type != E_BOSS && e.type != E_OFFICER && tget(int(floorf(e.a.x / TS)), int(floorf((e.a.y - 2) / TS))) == T_SPIKE) { kill_enemy(int(i), 0, C_SPIKE); continue; }
+        // spikes kill the soldiers like they kill the bro: only if they jump or fall onto them
+        if (e.type != E_BOSS && e.type != E_OFFICER && e.a.impact > 1.0f && tget(int(floorf(e.a.x / TS)), int(floorf((e.a.y - 2) / TS))) == T_SPIKE) { kill_enemy(int(i), 0, C_SPIKE); continue; }
+        e.a.impact = 0;
 
         if (e.type == E_BOSS) { update_boss(i); continue; }
 
-        if (e.stun > 0) { e.stun--; e.a.vx *= 0.9f; e.a.vy += GRAV; move_actor(e.a, e.a.vx, e.a.vy, false); continue; }
+        if (e.stun > 0) { e.stun--; if (e.frozen) { e.a.vx = 0; if (e.stun == 0) e.frozen = false; } else e.a.vx *= 0.9f; e.a.vy += GRAV; move_actor(e.a, e.a.vx, e.a.vy, false); continue; }
 
+        if (e.type == E_GUNNER && e.aux > 0) { // mid-salvo: planted, spraying straight ahead
+            e.a.vx = 0; e.a.vy += GRAV; if (e.a.vy > 5) e.a.vy = 5;
+            move_actor(e.a, 0, e.a.vy, false);
+            if (--e.burstT <= 0) {
+                e.burstT = 3; e.aux--;
+                float ang = e.a.face > 0 ? 0.0f : PI_F;
+                spawn_bullet(PK_EBULLET, e.a.x + float(e.a.face) * 11, e.a.y - 10 + float(rndi(-2, 2)), ang, 1.9f, 160, 1, false);
+                if (e.aux % 2 == 0) snd(SFX_ESHOT, e.a.x, e.a.y, 0.8f);
+            }
+            if (e.cd > 0) e.cd--;
+            continue;
+        }
         // vision
         bool see = false;
         float dx = 0, dy = 0;
@@ -836,6 +872,8 @@ void Game::update_enemies() {
         }
         if (see) { if (e.alert == 0) { e.alert = 1; e.timer = rndi(44, 62); /* reaction time: 0.7-1.0 s */ if (e.type == E_BOMBER) { snd(SFX_SCREAM, e.a.x, e.a.y, 1.0f); snd(SFX_IGNITE, e.a.x, e.a.y, 0.9f); e.aux = 188; } } } // the fuse is lit: ~3 s to live
         else if (e.alert > 0 && ++e.alert > 180) e.alert = 0;
+        if (see && !e.saw && e.alert > 1) e.timer = std::max(e.timer, rndi(40, 60)); // spotted again after losing the bro: he has to re-aim first
+        e.saw = see;
         if (e.type == E_BOMBER && e.aux > 0 && --e.aux == 0) { e.aux = -1; kill_enemy(int(i), 0, C_EXPLOSION); continue; } // blows up 3 s after charging, wherever he is
 
         if (e.type == E_BOMBER && e.aux > 0 && pa.size() < 700 && tick % 3 == 0) { // the lit fuse spits sparks
@@ -843,21 +881,24 @@ void Game::update_enemies() {
             f.life = f.maxlife = rndi(8, 14); f.col = rnd() < 0.5f ? RGB(255, 225, 90) : RGB(255, 120, 30); f.kind = 4;
             pa.push_back(f);
         }
-        float speed = e.type == E_BOMBER ? 1.15f : e.type == E_HEAVY ? 0.35f : 0.45f;
+        float speed = e.type == E_BOMBER ? 1.15f : (e.type == E_HEAVY || e.type == E_GUNNER) ? 0.35f : 0.45f;
         float want = 0;
         if (e.alert > 0 && e.type == E_BOMBER && see) {
             want = dx > 0 ? 1.0f : -1.0f;
             e.a.face = int(want);
             if (fabsf(dx) < 12 && fabsf(dy) < 14) want = 0; // right next to you: he waits for the fuse to run out
         } else if (e.alert > 0 && see) {
-            e.a.face = dx > 0 ? 1 : -1;
+            int nf = dx > 0 ? 1 : -1;
+            if (nf != e.a.face) { e.a.face = nf; e.timer = std::max(e.timer, rndi(30, 46)); } // turning round takes a moment (jumping over him buys time)
             if (e.timer > 0) e.timer--;
             else if (e.cd == 0) {
                 // soldiers only shoot straight ahead, so they need to be level with the bro
                 if (fabsf(dy) < 18) {
                     float ang = e.a.face > 0 ? 0.0f : PI_F;
                     float sx = e.a.x + float(e.a.face) * 8, sy = e.a.y - 9;
-                    if (e.type == E_HEAVY) {
+                    if (e.type == E_GUNNER) { // a long salvo of about 15 rounds
+                        e.aux = 15; e.burstT = 0; e.cd = 130 + rndi(0, 40);
+                    } else if (e.type == E_HEAVY) {
                         for (int k = -1; k <= 1; k++) spawn_bullet(PK_EBULLET, sx, sy + float(k) * 4, ang, 1.9f, 160, 1, false);
                         e.cd = 70;
                     } else if (e.type == E_RPG) { // slow rocket: dodge it or shoot it down
@@ -869,7 +910,7 @@ void Game::update_enemies() {
                         spawn_bullet(PK_EBULLET, sx, sy, ang, 1.8f, 160, 1, false);
                         e.cd = 60 + rndi(0, 30);
                     }
-                    snd(SFX_ESHOT, e.a.x, e.a.y);
+                    if (e.type != E_GUNNER) snd(SFX_ESHOT, e.a.x, e.a.y);
                 }
             }
             if (fabsf(dx) > 120 || fabsf(dy) >= 18) want = dx > 0 ? 0.6f : -0.6f; // close in / line up
@@ -1041,6 +1082,12 @@ void Game::update_projs() {
                         float ex = e.a.x, ey = e.a.y;
                         if (fabsf(p.x - ex) < float(e.a.w) / 2 + 3 && p.y > ey - float(e.a.h) - 2 && p.y < ey + 2) {
                             if (p.kind == PK_ROCKET || p.kind == PK_MISSILE || p.kind == PK_REMOTE || p.kind == PK_RAY) { boom = true; break; }
+                            if (p.kind == PK_CRYO) { // frozen solid (bosses and the officer shrug it off)
+                                if (e.type == E_BOSS || e.type == E_OFFICER) hurt_enemy(int(k), 1, p.vx, C_BULLET);
+                                else { e.frozen = true; e.stun = 360; e.a.vx = 0; e.flash = 4; debris(e.a.x, e.a.y - 8, 6, RGB(170, 225, 250), 1.4f); snd(SFX_HIT, e.a.x, e.a.y, 0.8f); }
+                                p.life = 0;
+                                break;
+                            }
                             hurt_enemy(int(k), p.dmg, p.vx, p.kind == PK_FLAME ? C_FIRE : (p.kind == PK_SPEAR ? C_MELEE : C_BULLET));
                             if (p.kind == PK_SPEAR) p.stuck = 8;
                             if (p.kind == PK_FLAME) { p.life -= 5; }
@@ -1163,7 +1210,7 @@ void Game::update_props() {
                 pl.lives++;
                 bool isNew = p.bro > 0 && !owned(p.bro);
                 if (isNew) { // a new bro joins the roster for good
-                    st.slots[curSlot].broMask |= 1u << p.bro;
+                    st.slots[curSlot].broMask |= 1ull << p.bro;
                     settings_dirty = true;
                 }
                 queue.push_back(pick_owned(pl.bro));
@@ -1173,10 +1220,12 @@ void Game::update_props() {
                 Particle s; s.x = pl.a.x; s.y = pl.a.y - 8; s.vx = 0; s.vy = -0.5f; s.life = s.maxlife = 30; s.col = RGB(255, 255, 120); s.kind = 2; pa.push_back(s);
             }
         } else if (p.type == PR_AMMO && !p.used && pl.alive) {
-            if (fabsf(pl.a.x - p.a.x) < 7 && fabsf((pl.a.y - 7) - (p.a.y - 3)) < 8 && pl.spec < BROS[pl.bro].specAmmo) {
-                p.used = true;
-                snd(SFX_PICKUP, pl.a.x, pl.a.y);
-                pl.spec = BROS[pl.bro].specAmmo;
+            if (fabsf(pl.a.x - p.a.x) < 7 && fabsf((pl.a.y - 7) - (p.a.y - 3)) < 8) {
+                if (pl.spec < BROS[pl.bro].specAmmo) {
+                    p.used = true;
+                    snd(SFX_PICKUP, pl.a.x, pl.a.y);
+                    pl.spec = BROS[pl.bro].specAmmo;
+                } else if (toastT == 0) { toastMsg = "AMMO FULL"; toastT = 70; } // the box stays where it is
             }
         } else if (p.type == PR_FLAG && !p.used && pl.alive) {
             if (fabsf(pl.a.x - p.a.x) < 14 && fabsf(pl.a.y - p.a.y) < 30) {
@@ -1293,11 +1342,11 @@ void Game::trigger_laughs() {
         float dx = e.a.x - pl.a.x, dy = e.a.y - pl.a.y, d = dx * dx + dy * dy;
         if (d < bd) { bd = d; nearest = int(i); }
     }
-    if (nearest >= 0) en[size_t(nearest)].laughDelay = 25; // whoever is closest (the killer) always laughs
-    for (size_t i = 0; i < en.size(); i++) {
+    (void)nearest;
+    for (size_t i = 0; i < en.size(); i++) { // only the soldiers who had the bro in sight can laugh, and only one in three does
         Enemy &e = en[i];
-        if (!e.alive || int(i) == nearest || e.type == E_BOSS || e.type == E_BOMBER || e.type == E_DOG) continue;
-        if (in_view(e.a.x, e.a.y, 0) && rnd() < 0.5f) e.laughDelay = 25 + rndi(8, 50);
+        if (!e.alive || e.type == E_BOSS || e.type == E_BOMBER || e.type == E_DOG || e.type == E_OFFICER) continue;
+        if (e.alert > 0 && in_view(e.a.x, e.a.y, 0) && rnd() < 1.0f / 3.0f) e.laughDelay = 25 + rndi(8, 50);
     }
 }
 

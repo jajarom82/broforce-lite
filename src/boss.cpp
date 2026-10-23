@@ -142,7 +142,7 @@ void Game::spawn_boss(int wd) {
     b.dir = -1;
     b.a.face = -1;
     switch (wd) {
-    case 0: b.a.w = 24; b.a.h = 34; b.a.x = float((W - 16) * TS); b.a.y = float(G * TS); b.hp = b.maxhp = 46; break;
+    case 0: b.a.w = 30; b.a.h = 42; b.a.x = float((W - 16) * TS); b.a.y = float(G * TS); b.hp = b.maxhp = 46; break;
     case 1: b.a.w = 46; b.a.h = 24; b.a.x = float((W - 18) * TS); b.a.y = float(G * TS); b.hp = b.maxhp = 52; break;
     case 2: b.a.w = 30; b.a.h = 20; b.a.x = float(100 * TS); b.a.y = float(24 * TS); b.hp = b.maxhp = 40; b.fx = float(100 * TS); break;
     case 3: b.a.w = 28; b.a.h = 38; b.a.x = float((W - 30) * TS); b.a.y = float(G * TS); b.hp = b.maxhp = 100; break;
@@ -231,8 +231,20 @@ void Game::update_boss(size_t idx) {
     };
 
     switch (e.kind) {
-    case 0: { // GENERAL MORTARO
+    case 0: { // GENERAL MORTARO: now a walking artillery mech. It keeps its distance, backs off when you close in, stops at shelters
         e.a.y = float(G * TS);
+        if (e.ph == 0 || e.ph == 2) {
+            float dir = 0;
+            if (pl.alive) { if (fabsf(dxp) > 150) dir = dxp >= 0 ? 1.0f : -1.0f; else if (fabsf(dxp) < 85) dir = dxp >= 0 ? -1.0f : 1.0f; }
+            if (e.ph == 2) dir = 0;                                            // planted while the mortars fire
+            if (dir != 0) {
+                float ax = e.a.x + dir * (float(e.a.w) / 2 + 3);
+                bool metal = false;
+                for (int yy = 2; yy <= int(e.a.h) - 2; yy += 6) if (tget(int(floorf(ax / TS)), int(floorf((e.a.y - float(yy)) / TS))) == T_METAL) metal = true;
+                if (!metal) { smash_ahead(int(dir), 3); e.a.x = std::max(minX, std::min(maxX, e.a.x + dir * 0.4f)); e.dir = int(dir); e.aux2 = 1; }
+                else e.aux2 = 0;
+            } else e.aux2 = 0;
+        }
         if (e.ph == 0) {
             if (pl.alive && e.timer % 75 == 40 && fabsf((pl.a.y - 8) - (e.a.y - 20)) < 40 && los(e.a.x, e.a.y - 16, pl.a.x, pl.a.y - 8))
                 for (int k = -1; k <= 1; k++) aimed_shot(PK_EBULLET, 1.9f, float(k) * 0.12f);
@@ -421,16 +433,49 @@ void Game::draw_boss(Gfx &g, const Enemy &e, int sx, int sy) {
     bool fl = e.flash > 0;
     int f = e.a.face >= 0 ? 1 : -1;
     switch (e.kind) {
-    case 0: { // the general: a huge heavy soldier with a peaked cap, medals and a mortar tube
-        int step = (e.ph == 2) ? 0 : (tick / 20) % 2;
-        const Sprite &s = enSpr[E_OFFICER][step ? 1 : 0];
-        scaled2(g, s, sx - 18, sy - 36, f < 0, fl);
-        g.rect(sx - 10, sy - 14, 20, 3, fl ? RGB(255, 255, 255) : RGB(210, 170, 60)); // sash
-        for (int k = 0; k < 3; k++) g.rect(sx - 8 + k * 5, sy - 22, 3, 3, fl ? RGB(255, 255, 255) : RGB(240, 200, 60)); // medals
-        int tx = sx + f * 8;
-        g.rect(tx - 2, sy - 40 - (e.ph == 1 ? (tick / 3) % 3 : 0), 5, 22, fl ? RGB(255, 255, 255) : RGB(60, 66, 54)); // mortar tube over the shoulder
-        g.rect(tx - 3, sy - 41, 7, 3, RGB(25, 28, 22));
-        if (e.ph == 1 && (tick / 4) % 2) g.rect(tx - 1, sy - 45, 3, 3, RGB(255, 200, 80));
+    case 0: { // the general's artillery mech: steel hull, piston legs that really walk, a cockpit, twin mortar tubes
+        u32 steel = fl ? RGB(255, 255, 255) : RGB(92, 102, 90), dk = fl ? RGB(230, 230, 230) : RGB(44, 50, 44), hi = fl ? RGB(255, 255, 255) : RGB(150, 164, 140);
+        u32 rivet = RGB(30, 34, 30), yel = RGB(220, 180, 40);
+        int ph = e.aux2 ? int(e.a.x / 5.0f) : 0;           // stride phase: only advances while it actually walks
+        int stepA = (ph & 1) ? 3 : 0, stepB = (ph & 1) ? 0 : 3;
+        // two piston legs with knees and wide feet
+        for (int l = 0; l < 2; l++) {
+            int lx = sx + (l ? 9 : -9), lift = l ? stepB : stepA;
+            g.rect(lx - 6, sy - 3 - lift, 12, 3, dk);                                   // foot
+            g.rect(lx - 6, sy - 3 - lift, 12, 1, hi);
+            g.rect(lx - 2, sy - 12 - lift / 2, 4, 9, rivet);                             // lower strut
+            g.rect(lx - 2, sy - 12 - lift / 2, 1, 9, steel);
+            g.rect(lx - 4 + f * 2, sy - 15 - lift / 2, 8, 4, steel);                      // knee joint
+            g.rect(lx - 3, sy - 22, 6, 8, dk);                                           // upper piston
+            g.rect(lx - 3, sy - 22, 2, 8, steel);
+        }
+        // hull
+        g.rect(sx - 16, sy - 34, 32, 14, dk);
+        g.rect(sx - 15, sy - 33, 30, 12, steel);
+        g.rect(sx - 15, sy - 33, 30, 2, hi);
+        g.rect(sx - 15, sy - 23, 30, 2, dk);
+        for (int k = 0; k < 4; k++) g.rect(sx - 15 + k * 8, sy - 22, 4, 2, k & 1 ? yel : rivet);   // hazard stripe
+        for (int k = 0; k < 5; k++) { g.pset(sx - 13 + k * 6, sy - 31, rivet); g.pset(sx - 13 + k * 6, sy - 26, rivet); }
+        g.rect(sx - 2, sy - 33, 1, 11, dk); g.rect(sx + 6, sy - 33, 1, 11, dk);        // panel seams
+        // cockpit dome on the facing side, the general behind the glass
+        int cx = sx + f * 5;
+        g.rect(cx - 6, sy - 41, 12, 9, dk);
+        g.rect(cx - 5, sy - 40, 10, 7, fl ? RGB(255, 255, 255) : RGB(110, 180, 210));
+        g.rect(cx - 5, sy - 40, 10, 1, RGB(190, 230, 245));
+        g.rect(cx - 2, sy - 38, 5, 4, RGB(225, 180, 135));                              // his face
+        g.rect(cx - 3, sy - 40, 7, 2, RGB(70, 90, 50));                                 // peaked cap
+        g.pset(cx - 1 + (f > 0 ? 1 : 0), sy - 37, RGB(20, 20, 20)); g.pset(cx + 1 + (f > 0 ? 1 : 0), sy - 37, RGB(20, 20, 20));
+        // twin mortar tubes on the back, raised while it prepares the barrage
+        int up = e.ph == 1 ? 8 + (tick / 3) % 3 : e.ph == 2 ? 10 : 0;
+        for (int t = 0; t < 2; t++) {
+            int tx = sx - f * (8 + t * 7);
+            g.rect(tx - 2, sy - 40 - up, 5, 9 + up, fl ? RGB(255, 255, 255) : RGB(60, 66, 54));
+            g.rect(tx - 3, sy - 41 - up, 7, 3, RGB(25, 28, 22));
+            if (e.ph == 1 && (tick / 4) % 2) g.rect(tx - 1, sy - 45 - up, 3, 3, RGB(255, 200, 80));
+            if (e.ph == 2 && e.timer < 8) g.rect(tx - 2, sy - 46 - up, 5, 5, RGB(255, 230, 140));   // muzzle flash as the shells leave
+        }
+        g.rect(sx + f * 12, sy - 30, 3, 5, dk);                                         // exhaust stack
+        g.rect_blend(sx + f * 11, sy - 36 - (tick / 6) % 4, 5, 4, RGB(90, 90, 95), 120);
         break;
     }
     case 1: { // iron scorpion: tracked hull, turret, stinger tail

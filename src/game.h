@@ -1,7 +1,7 @@
 // Broyoo - game logic + rendering. No SDL here so it can be tested headless.
 #pragma once
 #define GAME_NAME "BROFORCE LITE"
-#define GAME_VERSION "0.4.8"
+#define GAME_VERSION "0.4.9"
 #include "gfx.h"
 #include <string>
 #include <vector>
@@ -18,7 +18,7 @@ struct SaveSlot {
     int mask = 0;     // bit n set = level n cleared
     int kills = 0;    // total kills across cleared levels
     int seconds = 0;  // total time across cleared levels
-    unsigned broMask = 1; // bit n set = bro n freed (Rambro is always available)
+    unsigned long long broMask = 1; // bit n set = bro n freed (Rambro is always available)
 };
 
 struct Settings {
@@ -41,7 +41,7 @@ const char *boss_hint(int world);
 enum Tile : uint8_t { T_AIR, T_DIRT, T_STONE, T_BRICK, T_WOOD, T_METAL, T_BARREL, T_SPIKE, T_CRATE, T_SAND, T_WIRE, T_COUNT };
 
 enum Prim { P_MG, P_ROCKET, P_FLAME, P_SHOTGUN, P_DUAL, P_DYNAMITE, P_KATANA, P_HOMING, P_RAY, P_SILENT, P_REVOLVER,
-            P_MINIGUN, P_CHARGE, P_WHIP, P_FIST, P_BURST, P_BOOMERANG, P_CHAINSAW, P_SPEAR, P_CHAKRAM };
+            P_MINIGUN, P_CHARGE, P_WHIP, P_FIST, P_BURST, P_BOOMERANG, P_CHAINSAW, P_SPEAR, P_CHAKRAM, P_CRYO };
 enum Spec { S_GRENADE, S_SWARM, S_FIREBOMB, S_AIRSTRIKE, S_FLASH, S_TURKEY, S_DASH, S_REMOTE, S_CLOAK, S_MOLOTOV,
             S_INVINC, S_LOCKON, S_GRAPPLE, S_LIGHTNING, S_ADRENALINE, S_JETPACK, S_BLAST, S_TELEPORT, S_SPEARS, S_WARCRY };
 
@@ -54,7 +54,7 @@ struct BroDef {
     int specAmmo;
     const char *primName, *specName;
 };
-constexpr int NUM_BROS = 31;
+constexpr int NUM_BROS = 35;
 extern const BroDef BROS[NUM_BROS];
 
 struct Actor {
@@ -62,10 +62,11 @@ struct Actor {
     int w = 6, h = 11;
     bool ground = false;
     int face = 1;
+    float impact = 0; // downward speed at the last landing (spikes only kill a jump or a fall)
 };
 
-enum EType { E_MOOK, E_BOMBER, E_HEAVY, E_BOSS, E_OFFICER, E_DOG, E_RPG };
-constexpr int E_TYPES = 7;
+enum EType { E_MOOK, E_BOMBER, E_HEAVY, E_BOSS, E_OFFICER, E_DOG, E_RPG, E_GUNNER };
+constexpr int E_TYPES = 8;
 
 // how a victim died (the end-of-level recap replays it)
 enum Cause { C_BULLET, C_EXPLOSION, C_FIRE, C_MELEE, C_CRUSH, C_SPIKE, C_LIGHTNING, C_GAS, C_FALL, C_COUNT };
@@ -74,13 +75,16 @@ struct Enemy {
     Actor a;
     int type = E_MOOK;
     int hp = 1, state = 0, timer = 0, cd = 0, stun = 0, alert = 0, anim = 0, flash = 0, dir = 1, laugh = 0, laughDelay = 0;
-    int kind = 0, maxhp = 1, ph = 0, aux = 0; // boss: world it belongs to, health, phase, cooldown
+    int kind = 0, maxhp = 1, ph = 0, aux = 0, aux2 = 0; // boss: world it belongs to, health, phase, cooldown
     float fx = 0, fy = 0;                     // boss scratch (spotlight position)
     bool alive = true;
+    bool frozen = false; // hit by the cryo gun: stuck in ice until something breaks him
+    bool saw = false;  // could see the bro last tick (a fresh sighting restarts his reaction time)
+    int burstT = 0;    // machine gunner: ticks to the next round of his salvo
 };
 
 enum PKind { PK_BULLET, PK_EBULLET, PK_ROCKET, PK_GRENADE, PK_FLAME, PK_DYNA, PK_MOLOTOV, PK_HOMING, PK_RAY, PK_MISSILE,
-             PK_REMOTE, PK_TURKEY, PK_FIREBOMB, PK_REVBULLET, PK_PELLET, PK_BOOMERANG, PK_EROCKET, PK_SPEAR };
+             PK_REMOTE, PK_TURKEY, PK_FIREBOMB, PK_REVBULLET, PK_PELLET, PK_BOOMERANG, PK_EROCKET, PK_SPEAR, PK_CRYO };
 struct Proj {
     float x = 0, y = 0, vx = 0, vy = 0;
     int kind = PK_BULLET, life = 0, dmg = 1, pierce = 0, bounces = 0, target = -1, stuck = 0;
@@ -141,9 +145,11 @@ struct Tree {
 struct Player {
     Actor a;
     bool wired = false; // tangled in barbed wire
+    bool crouch = false; // ducking: slower, shoots a little lower
+    int knockT = 0;      // thrown by a blast: no steering for a moment
     int bro = 0, lives = 4, spec = 0, cool = 0, invuln = 0, cloak = 0, dashT = 0, grappleT = 0;
     float gx = 0, gy = 0;
-    int meleeT = 0, punchT = 0, anim = 0, charge = 0, spin = 0, revAmmo = 6, reload = 0, swarm = 0, swarmT = 0;
+    int meleeT = 0, punchT = 0, punchMax = 10, anim = 0, charge = 0, spin = 0, revAmmo = 6, reload = 0, swarm = 0, swarmT = 0;
     int lockLeft = 0, lockT = 0, burst = 0, adren = 0, jet = 0;
     int coyote = 0, jumpBuf = 0, wall = 0, wallT = 0, wallSide = 0, whipT = 0, whipLen = 0, whipDir = 0;
     bool alive = false, remote = false, ride = false;
@@ -194,15 +200,15 @@ public:
     // each bro (but Rambro) is hidden in one level; a level counts as 100% only when it is cleared AND all its bros are freed
     static int bro_home_level(int b) { return b <= 0 ? -1 : (b - 1) * NUM_LEVELS / (NUM_BROS - 1); }
     int level_bro_total(int lvl) const { int n = 0; for (int b = 1; b < NUM_BROS; b++) if (bro_home_level(b) == lvl) n++; return n; }
-    int level_bro_owned(const SaveSlot &s, int lvl) const { int n = 0; for (int b = 1; b < NUM_BROS; b++) if (bro_home_level(b) == lvl && ((s.broMask >> b) & 1u)) n++; return n; }
+    int level_bro_owned(const SaveSlot &s, int lvl) const { int n = 0; for (int b = 1; b < NUM_BROS; b++) if (bro_home_level(b) == lvl && ((s.broMask >> b) & 1ull)) n++; return n; }
     bool level_full(const SaveSlot &s, int lvl) const { return (s.mask & (1 << lvl)) && level_bro_owned(s, lvl) == level_bro_total(lvl); }
     int completion(const SaveSlot &s) const {
         int half = 0; // in half-levels: cleared = 1, cleared with every bro freed = 2
         for (int i = 0; i < NUM_LEVELS; i++) if (s.mask & (1 << i)) half += level_full(s, i) ? 2 : 1;
         return half * 100 / (2 * NUM_LEVELS);
     }
-    int owned_count(const SaveSlot &s) const { int n = 0; for (int b = 0; b < NUM_BROS; b++) if (b == 0 || ((s.broMask >> b) & 1u)) n++; return n; }
-    bool owned(int b) const { return debugMode || b == 0 || ((st.slots[curSlot].broMask >> b) & 1u); }
+    int owned_count(const SaveSlot &s) const { int n = 0; for (int b = 0; b < NUM_BROS; b++) if (b == 0 || ((s.broMask >> b) & 1ull)) n++; return n; }
+    bool owned(int b) const { return debugMode || b == 0 || ((st.slots[curSlot].broMask >> b) & 1ull); }
     void set_debug(bool d) { debugMode = d; }
     bool debug_mode() const { return debugMode; }
     int new_bro_now() const { return newBro; }
@@ -243,6 +249,7 @@ public:
     int exfil_resT() const { return ex.resT; }
     int exfil_phase() const { return ex.phase; }
     const Sprite &debug_face(int b) const { return broFace[b]; }
+    const Sprite &debug_face_dead(int b) const { return broFaceDead[b]; }
     float saw_volume() const { return (sawT > 0 && gs == GS_PLAY) ? 1.0f : 0.0f; }
     float flame_volume() const { return (flameT > 0 && gs == GS_PLAY) ? 1.0f : 0.0f; } // flamethrower loop on / off
     int tree_count() const { int n = 0; for (const Tree &t : trees) if (t.fall == 0) n++; return n; }
@@ -253,6 +260,8 @@ public:
     int kill_log_size() const { return int(killLog.size()); }
     bool debug_ladder(float &x, float &y) const { x = ex.x; y = ex.y + 5 + ex.ladderLen; return ex.phase > 0; }
     int officer_type() const { return E_OFFICER; }
+    bool debug_frozen(int i) const { return i >= 0 && i < int(en.size()) && en[size_t(i)].frozen; }
+    int alerted_count() const { int n = 0; for (const Enemy &e : en) if (e.alive && e.alert > 0) n++; return n; }
     int laughing_count() const { int n = 0; for (const Enemy &e : en) if (e.alive && e.laugh > 0) n++; return n; }
     int tick_count() const { return tick; }
     int chunk_count() const { return int(chunks.size()); }
@@ -263,6 +272,8 @@ public:
         for (const Prop &p : props) if (p.type == type && !p.used) { x = p.a.x; y = p.a.y; return true; }
         return false;
     }
+    void debug_add_prop(int type, float x, float y) { add_prop(type, x, y); }
+    int toast_ticks() const { return toastT; }
     int ammo_props() const { int n = 0; for (const Prop &p : props) if (p.type == PR_AMMO && !p.used) n++; return n; }
     void debug_set_tile(int x, int y, uint8_t t) { set_tile(x, y, t); }
     int debug_enemy_count() const { return int(en.size()); }
@@ -433,6 +444,7 @@ private:
     int lvl_track() const { static const int m[NUM_WORLDS] = {0, 1, 2, 1, 2, 3}; return m[world % NUM_WORLDS]; }
     int stateT = 0;
     int bannerT = 0;
+    int toastT = 0; const char *toastMsg = ""; // short message above the bro (ammo full...)
     Input prev;
     bool pressed(bool cur, bool old) const { return cur && !old; }
 
@@ -454,6 +466,7 @@ private:
     void add_proj(const Proj &p);
     void explode(float x, float y, float r, float power, bool friendly, bool shell = false);
     void process_explosions();
+    float blast_lethal(float r, float power) const;
     void hurt_enemy(int i, int dmg, float dirx, int cause = C_BULLET);
     void kill_enemy(int i, float dirx, int cause = C_BULLET);
     void damage_tile(int tx, int ty, int dmg, bool silent = false);
@@ -479,7 +492,7 @@ private:
     void draw_saber(Gfx &g, const Player &p, int sx, int sy);
     void draw_chainsaw(Gfx &g, const Player &p, int sx, int sy);
     void draw_punch(Gfx &g, const Player &p, int sx, int sy);
-    void draw_actor_bro(Gfx &g, const Actor &a, int bro, int anim, bool air, bool flash, bool ghost);
+    void draw_actor_bro(Gfx &g, const Actor &a, int bro, int anim, bool air, bool flash, bool ghost, bool crouch = false);
     void draw_enemy(Gfx &g, const Enemy &e, int sx, int sy);
     void draw_hud(Gfx &g);
     void draw_menu(Gfx &g);
@@ -490,6 +503,7 @@ private:
     Sprite tileSpr[T_COUNT][4];
     Sprite broSpr[NUM_BROS][4];
     Sprite broFace[NUM_BROS]; // 24x24 HUD portraits
+    Sprite broFaceDead[NUM_BROS]; // the same, dead
     Sprite enSpr[E_TYPES][4];
     bool spritesBuilt = false;
 };
