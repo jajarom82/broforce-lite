@@ -329,7 +329,7 @@ void Game::gen_level(int lvl) {
     memset(blood, 0, sizeof(blood));
     memset(pillar, 0, sizeof(pillar));
     crumble.clear();
-    trees.clear();
+    trees.clear(); belts.clear(); decos.clear(); birds.clear();
     burnList.clear(); gas.clear(); chunks.clear(); collapseQ.clear(); riding = -1;
     en.clear(); pr.clear(); pa.clear(); booms.clear(); props.clear(); pend.clear(); strikes.clear();
     bossIdx = -1;
@@ -481,17 +481,7 @@ void Game::gen_level(int lvl) {
             add_prop(PR_AMMO, float((fx + 2) * TS), float(fy * TS));
         }
     }
-    // jungle palms: tall background trees of varied sizes, scattered along the ground
-    if (!boss && world == 0) {
-        for (int x = 16; x < W - 8; x += rndi(5, 12)) {
-            if (hgt[x] >= H - 2) continue;
-            Tree t;
-            t.x = float(x * TS + rndi(0, 7)); t.y = float(hgt[x] * TS);
-            t.h = rndi(44, 100);
-            t.lean = rndi(-9, 9);
-            trees.push_back(t);
-        }
-    }
+    if (!boss) gen_scenery(hgt); // the living background: trees, rocks, tents, igloos, birds...
     // clear spawn area
     for (int x = 3; x < 12; x++)
         for (int y = 0; y < hgt[x]; y++) set_tile(x, y, T_AIR);
@@ -509,6 +499,8 @@ void Game::gen_level(int lvl) {
     } else {
         spawn_boss(world);
     }
+    // soldiers placed beside a structure can end up inside sloping ground: lift them onto the surface
+    for (Enemy &e : en) if (e.type != E_BOSS) free_up(e.a, 40);
     assign_cage_bros();
     checkX = 6.0f * TS + 4;
     checkY = float(hgt[6] * TS);
@@ -622,6 +614,7 @@ void Game::process_explosions() {
         booms.push_back({ex.x, ex.y, 0, ex.r > 36 ? 22 : 16, ex.r});
         snd(ex.r > 36 ? SFX_BOOM_BIG : ex.r > 30 ? SFX_BOOM : SFX_BOOM_SMALL, ex.x, ex.y, 1.0f, ex.r > 30 ? 0.35f : 0.0f); // big blasts are heard even from off-screen
         hit_trees(ex.x, ex.y, ex.r);
+        scare_birds(ex.x, ex.y, ex.r * 3.0f + 50.0f);
         int ns = int(ex.r / 2);
         for (int i = 0; i < ns && pa.size() < 700; i++) {
             Particle p;
@@ -1055,8 +1048,44 @@ void Game::hit_trees(float x, float y, float r) {
         }
         if (!hit) continue;
         t.fall = 1;
+        scare_tree(t.id); // the birds in its crown fly off
         t.dir = x < t.x ? 1 : -1; // topples away from the blast
         snd(SFX_CRASH, t.x, t.y - float(t.h) / 2, 0.5f);
+    }
+}
+
+void Game::update_belts() {
+    for (size_t i = 0; i < belts.size();) {
+        Belt &b = belts[i];
+        b.age++;
+        if (!solid_px(b.x, b.y + 1)) { b.vy = std::min(b.vy + 0.19f, 4.5f); for (int k = 0; k < int(ceilf(b.vy)) && !solid_px(b.x, b.y + 1); k++) b.y += 1; } else b.vy = 0;
+        if (pa.size() < 700 && b.age % 3 == 0) { // sparks off the fuse
+            Particle f; f.x = b.x + (rnd() - 0.5f) * 4; f.y = b.y - 6; f.vx = (rnd() - 0.5f) * 0.6f; f.vy = -0.6f - rnd() * 0.7f;
+            f.life = f.maxlife = rndi(8, 14); f.col = rnd() < 0.5f ? RGB(255, 225, 90) : RGB(255, 120, 30); f.kind = 4;
+            pa.push_back(f);
+        }
+        if (b.age % 190 == 0) snd(SFX_IGNITE, b.x, b.y, 0.8f);   // keeps crackling
+        if (--b.t <= 0) {
+            pend.push_back({b.x, b.y - 4, 24.0f, 12.0f, false, 0});
+            belts[i] = belts.back(); belts.pop_back();
+            continue;
+        }
+        i++;
+    }
+}
+
+void Game::draw_belts(Gfx &g, int ox, int oy) {
+    for (const Belt &b : belts) {
+        int bx = int(b.x) - ox - 6, by = int(b.y) - oy - 5;
+        if (bx < -20 || bx > VW + 20 || by < -20 || by > VH + 20) continue;
+        g.rect(bx - 1, by + 1, 14, 4, RGB(50, 35, 25));                       // the strap
+        for (int k = 0; k < 4; k++) {
+            g.rect(bx + k * 3 + 1, by, 2, 5, RGB(210, 40, 35));               // dynamite
+            g.rect(bx + k * 3 + 1, by, 2, 1, RGB(255, 220, 90));
+        }
+        int fl = (b.age / 2) % 3;                                             // the fuse's flame
+        g.rect(bx + 5, by - 3 - fl, 2, 2 + fl, RGB(255, 130, 30));
+        g.rect(bx + 5, by - 2 - fl, 1, 1 + fl, RGB(255, 235, 110));
     }
 }
 
@@ -1092,16 +1121,36 @@ void Game::draw_trees(Gfx &g, int ox, int oy) {
             tree_point(t, f, px, up);
             int sx, sy;
             place(px + sway * f * f, up, sx, sy);
-            int w = f < 0.5f ? 4 : 3;
+            int w = t.kind == 2 ? 2 + (f < 0.4f ? 1 : 0) : (f < 0.5f ? 4 : 3);
+            if (t.kind == 1 && f > 0.3f) continue;                      // a pine's trunk disappears behind its needles
             bool ring = (i % 5) == 0;
-            u32 c = ring ? RGB(88, 62, 38) : (i & 1 ? RGB(128, 92, 58) : RGB(116, 82, 50));
+            u32 c = t.kind == 2 ? (i & 1 ? RGB(78, 66, 58) : RGB(64, 54, 48)) : ring ? RGB(88, 62, 38) : (i & 1 ? RGB(128, 92, 58) : RGB(116, 82, 50));
             g.rect(sx - w / 2, sy, w, 2, c);
-            g.pset(sx - w / 2, sy, RGB(150, 112, 74));
+            if (t.kind != 2) g.pset(sx - w / 2, sy, RGB(150, 112, 74));
         }
         float tpx, tup;
         tree_point(t, 1.0f, tpx, tup);
         int cx, cy;
         place(tpx + sway, tup, cx, cy);
+        if (t.kind == 1) { // pine: stacked tiers of dark needles with snow on the ledges
+            int ch = t.h * 3 / 4;
+            for (int j = 0; j < ch; j++) {
+                float u = float(j) / float(ch);
+                int half = 1 + int(u * float(6 + t.h / 8) * (0.72f + 0.28f * float(j % 9) / 9.0f));
+                int yy = int(t.y - float(t.h) + float(j)) - oy, xx = cx - int(t.lean * 0 + 0) + int(float(t.lean) * (1.0f - u) * 0.0f);
+                xx = int(t.x + tpx * (1.0f - u * 0.0f) * (1.0f - u) * 0.0f) + int((tpx) * (1.0f - u)) - ox;
+                g.rect(xx - half, yy, half * 2 + 1, 1, (j & 1) ? RGB(26, 78, 58) : RGB(34, 94, 68));
+                if (j % 9 == 0) g.rect(xx - half, yy, std::max(2, half), 1, RGB(244, 248, 252));
+            }
+            continue;
+        }
+        if (t.kind == 2) { // bare trunk: a few broken branches
+            for (int k = 0; k < 4; k++) {
+                int by = cy + k * 5, sgn = (k & 1) ? 1 : -1;
+                for (int s2 = 0; s2 < 7 - k; s2++) g.pset(cx + sgn * s2, by - s2 / 2, RGB(70, 58, 50));
+            }
+            continue;
+        }
         // crown: drooping fronds with leaflets
         int flen = 14 + t.h / 7;
         for (int k = 0; k < 8; k++) {

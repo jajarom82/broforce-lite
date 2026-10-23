@@ -70,6 +70,13 @@ void Game::move_actor(Actor &a, float dx, float dy, bool step, bool *hitx) {
     if (!a.ground && box_hits(a.x, a.y + 0.5f, a.w, a.h)) a.ground = true;
 }
 
+bool Game::free_up(Actor &a, int maxUp) const {
+    if (!box_hits(a.x, a.y, a.w, a.h)) return true;
+    for (int up = 1; up <= maxUp; up++)
+        if (!box_hits(a.x, a.y - float(up), a.w, a.h)) { a.y -= float(up); a.vy = 0; return true; }
+    return false;
+}
+
 bool Game::los(float x0, float y0, float x1, float y1) const {
     float dx = x1 - x0, dy = y1 - y0;
     int n = int(sqrtf(dx * dx + dy * dy) / 3) + 1;
@@ -586,7 +593,12 @@ void Game::kill_enemy(int i, float dirx, int cause) {
     int n = (e.type == E_HEAVY || e.type == E_GUNNER) ? 90 : e.type == E_DOG ? 28 : 50;
     gore(e.a.x, e.a.y - 8, n, dirx >= 0 ? 1.0f : -1.0f, RGB(200, 20, 20));
     gibs(e.a.x, e.a.y - 8, (e.type == E_HEAVY || e.type == E_GUNNER) ? 8 : e.type == E_DOG ? 3 : 4, dirx >= 0 ? 1.0f : -1.0f);
-    if (e.type == E_BOMBER && (e.aux < 0 || bomberFuse > 0)) pend.push_back({e.a.x, e.a.y - 7, 24.0f, 12.0f, false, e.aux < 0 ? 0 : bomberFuse});
+    if (e.type == E_BOMBER && e.aux < 0) pend.push_back({e.a.x, e.a.y - 7, 24.0f, 12.0f, false, 0});
+    else if (e.type == E_BOMBER && bomberFuse > 0) { // the fuse is lit: the belt stays on the ground, visible and crackling, until it goes off
+        Belt b; b.x = e.a.x; b.y = e.a.y; b.t = bomberFuse;
+        belts.push_back(b);
+        snd(SFX_IGNITE, e.a.x, e.a.y, 0.9f);
+    }
 }
 
 void Game::open_cage(Prop &c) {
@@ -801,6 +813,7 @@ void Game::update_enemies() {
         if (e.cd > 0) e.cd--;
         bool near_ = fabsf(e.a.x - (pl.alive ? pl.a.x : camX + VW / 2.0f)) < 420 && e.a.y < float(H * TS) + 100;
         if (e.type != E_BOSS && !near_) { e.alert = 0; e.saw = false; continue; } // out of sight, out of mind: he starts afresh when you come back
+        if (e.type != E_BOSS && e.type != E_OFFICER && !free_up(e.a, 24)) { kill_enemy(int(i), 0, C_CRUSH); continue; } // buried in the scenery: lifted out, or crushed if too deep
         if (e.type != E_BOSS && e.a.y > float(H * TS) + 40) { kill_enemy(int(i), 0, C_FALL); continue; }
 
         // mocking laughter after the bro dies
@@ -1288,7 +1301,7 @@ void Game::update(const Input &in) {
         stateT++;
         if (bannerT > 0) bannerT--;
         if (flashScreen > 0) flashScreen--;
-        update_gas(); update_trees();
+        update_gas(); update_trees(); update_belts(); update_scenery();
         if (pl.alive) update_player(in);
         else {
             pl.deadT++;

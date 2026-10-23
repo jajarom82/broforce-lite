@@ -2,7 +2,7 @@
 #   ARM game binary:  make            (needs `source /root/setup-env.sh`)
 #   native headless test:  make headless && ./build/headless out/
 CXXFLAGS_COMMON := -std=c++17 -O2 -Wall -Wextra
-SRC_CORE := src/gfx.cpp src/data.cpp src/world.cpp src/boss.cpp src/logic.cpp src/render.cpp src/audio.cpp
+SRC_CORE := src/gfx.cpp src/data.cpp src/world.cpp src/boss.cpp src/logic.cpp src/render.cpp src/audio.cpp src/scenery.cpp
 BUILD := build
 
 ARM_FLAGS := -DPLATFORM_MIYOO_MINI=1 -marm -mtune=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard -march=armv7ve+simd -Wno-psabi

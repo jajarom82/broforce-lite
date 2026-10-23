@@ -414,7 +414,9 @@ void Game::render(Gfx &g) {
     }
     int ox = int(camX) + shakeX, oy = int(camY) + shakeY;
     draw_bg(g);
-    draw_trees(g, ox, oy); // background plane, behind the ground and everyone
+    draw_scenery(g, ox, oy); // background plane, behind the ground and everyone
+    draw_trees(g, ox, oy);
+    draw_birds(g, ox, oy);
     int tx0 = std::max(0, ox / TS), tx1 = std::min(W - 1, (ox + VW) / TS);
     int ty0 = std::max(0, oy / TS), ty1 = std::min(H - 1, (oy + VH) / TS);
     for (int ty = ty0; ty <= ty1; ty++)
@@ -459,6 +461,7 @@ void Game::render(Gfx &g) {
         if (sx < -60 || sx > VW + 60 || sy < -40 || sy > VH + 40) continue;
         draw_enemy(g, e, sx, sy);
     }
+    draw_belts(g, ox, oy);
     draw_boss_fx(g, ox, oy);
     draw_gas(g, ox, oy);
     draw_exfil_world(g, ox, oy);

@@ -1,4 +1,5 @@
 // Broyoo - headless test driver: runs the game logic without SDL, dumps PNG screenshots, checks rules.
+#include <chrono>
 #include "game.h"
 #include "audio.h"
 #include "phrases.h"
@@ -1471,6 +1472,9 @@ int main(int argc, char **argv) {
         CHECK(g.enemies_alive() == 0, "a blast next to a kamikaze kills him");
         for (int i = 0; i < 40; i++) { g.update(Input()); g.sounds.clear(); }
         CHECK(g.stat_explosions - e0 == afterBlast, "...but his belt has not gone off yet");
+        CHECK(g.belt_count() == 1, "...and his lit belt stays on the ground, visible, until it goes off");
+        g.debug_teleport(float((x0 + 34) * TS), float(gr * TS)); run(g, 25, Input());
+        shot(g, "29_lit_belt", 4);
         for (int i = 0; i < 200; i++) { g.update(Input()); g.sounds.clear(); }
         CHECK(g.stat_explosions - e0 == afterBlast + 1, "...it goes off once his (standard) fuse has run out");
         // c. killed some other way before lighting the fuse: no blast
@@ -1709,6 +1713,134 @@ int main(int argc, char **argv) {
         bool alldiff = true;
         for (int b = 0; b < NUM_BROS; b++) if (g.debug_face(b).d == g.debug_face_dead(b).d) alldiff = false;
         CHECK(alldiff, "every bro has a dead face of his own");
+    }
+
+    // ---- 52. no soldier is ever stuck inside the scenery ----
+    {
+        int bad = 0, firstLvl = -1; float bx_ = 0, by_ = 0; int bt_ = 0; int when = 0;
+        for (int lvl = 0; lvl < NUM_LEVELS && bad == 0; lvl += 1) {
+            g.debug_start_level(lvl, 0);
+            g.player().invuln = 100000;
+            run(g, 3, Input());
+            int W_ = g.world_w();
+            for (int x = 14; x < W_ - 14 && bad == 0; x += 14) {
+                g.debug_teleport(float(x * TS), float(g.ground_row(x) * TS));
+                for (int i = 0; i < 25; i++) {
+                    g.update(Input()); g.sounds.clear();
+                    float ex, ey; int et;
+                    int n = g.debug_embedded(ex, ey, et);
+                    if (n > 0 && bad == 0) { bad = n; firstLvl = lvl; bx_ = ex; by_ = ey; bt_ = et; when = x; }
+                }
+            }
+        }
+        if (bad) printf("embedded soldier: level %d, type %d at %.0f,%.0f (player at tile %d)\n", firstLvl, bt_, bx_, by_, when);
+        CHECK(bad == 0, "no soldier ends up inside solid ground");
+    }
+
+    // ---- 53. living background: trees, rocks, tents and camels, igloo and penguins, birds ----
+    {
+        int gr; int x0 = 100;
+        g.debug_start_level(0, 0);
+        CHECK(g.tree_count() >= 40, "the jungle is full of palm trees");
+        CHECK(g.bird_count(0) >= 15, "the jungle has birds, in the trees and on the ground");
+        CHECK(g.deco_count(D_ROCK) >= 8, "there are rocks lying around");
+        g.debug_start_level(4, 0);
+        CHECK(g.deco_count(D_TENT) >= 1 && g.deco_count(D_CAMEL) >= 1, "a desert level has a tent or two with dromedaries");
+        g.debug_start_level(12, 0);
+        CHECK(g.deco_count(D_IGLOO) >= 1 && g.deco_count(D_PENGUIN) >= 3, "an arctic level has an igloo and penguins");
+        // birds take off when somebody gets close, the bro or a soldier
+        stage(x0, 80, gr);
+        g.debug_clear_trees();
+        g.debug_teleport(float((x0 + 10) * TS), float(gr * TS));
+        g.debug_add_bird(float((x0 + 40) * TS), float(gr * TS));
+        g.debug_add_bird(float((x0 + 10) * TS) + 15.0f, float(gr * TS));
+        for (int i = 0; i < 3; i++) { g.update(Input()); g.sounds.clear(); }
+        CHECK(g.bird_count(1) >= 1, "a bird next to the bro flies off...");
+        g.debug_add_enemy(E_MOOK, float((x0 + 40) * TS) + 10.0f, float(gr * TS), -1);
+        g.debug_teleport(float((x0 + 10) * TS), float(gr * TS));
+        for (int i = 0; i < 3; i++) { g.update(Input()); g.sounds.clear(); }
+        CHECK(g.bird_count(1) == 2, "...and so does one a soldier walks up to");
+        for (int i = 0; i < 300; i++) { g.update(Input()); g.sounds.clear(); }
+        CHECK(g.bird_count(1) == 0, "flying birds disappear out of the sky");
+        // a falling tree sends its birds flying
+        stage(x0, 80, gr);
+        g.debug_clear_trees(); g.debug_clear_birds();
+        g.debug_teleport(float((x0 + 2) * TS), float(gr * TS));
+        int tid = g.debug_add_tree(float((x0 + 30) * TS), float(gr * TS), 70);
+        g.debug_add_bird(float((x0 + 30) * TS), float(gr * TS) - 69.0f, tid);
+        g.debug_add_bird(float((x0 + 30) * TS) + 4.0f, float(gr * TS) - 69.0f, tid);
+        CHECK(g.bird_count(0) == 2, "birds are perched in the tree");
+        g.debug_explode(float((x0 + 30) * TS), float(gr * TS) - 40.0f, 14, 10, true);
+        for (int i = 0; i < 2; i++) { g.update(Input()); g.sounds.clear(); }
+        CHECK(g.bird_count(1) == 2, "when the tree falls its birds fly off");
+        // screenshots of each world's scenery
+        for (int w = 0; w < 6; w++) {
+            g.debug_start_level(w * 4, 0);
+            g.player().invuln = 100000;
+            float dx_, dy_;
+            int want = w == 1 ? D_TENT : w == 3 ? D_IGLOO : w == 2 ? D_LAMP : w == 4 ? D_RUBBLE : w == 5 ? D_SKULLS : D_ROCK;
+            float tx = 40.0f * TS;
+            if (g.debug_deco(want, dx_, dy_)) tx = dx_ - 60.0f;
+            g.debug_teleport(tx, float(g.ground_row(int(tx / TS)) * TS));
+            run(g, 20, Input());
+            char nm[32]; snprintf(nm, sizeof(nm), "30_scenery_w%d", w);
+            shot(g, nm);
+        }
+    }
+
+    // ---- 54. scenery sheet (every decoration on flat ground) ----
+    {
+        int gr; int x0 = 100;
+        for (int w = 0; w < 2; w++) {
+            g.debug_start_level(w == 0 ? 0 : 12, 0);
+            int gr2 = 0; { stage(x0, 80, gr2); }
+            gr = gr2;
+            g.debug_clear_trees(); g.debug_clear_birds(); g.debug_clear_decos();
+            for (int x = x0; x < x0 + 80; x++) g.debug_set_surf(x, gr);
+            g.player().invuln = 100000;
+            g.debug_teleport(float((x0 + 6) * TS), float(gr * TS));
+            float base = float((x0 + 8) * TS), gy = float(gr * TS);
+            if (w == 0) {
+                g.debug_add_deco(D_ROCK, base - 40, gy, 0, 1, 14); g.debug_add_deco(D_ROCK, base - 18, gy, 1, 1, 9);
+                g.debug_add_deco(D_TENT, base + 20, gy, 0); g.debug_add_deco(D_CAMEL, base + 62, gy, 0, 1); g.debug_add_deco(D_CAMEL, base + 98, gy, 1, -1);
+                g.debug_add_deco(D_CACTUS, base + 122, gy, 1);
+                g.debug_bird_state(base - 60, gy, 0, 0); g.debug_bird_state(base - 8, gy, 0, 1); g.debug_bird_state(base + 10, gy - 40, 1, 2);
+                g.debug_add_deco(D_LAMP, base - 80, gy, 0); g.debug_add_deco(D_RUBBLE, base + 140, gy, 1, 1, 16);
+            } else {
+                g.debug_add_deco(D_IGLOO, base + 20, gy);
+                for (int k = 0; k < 4; k++) g.debug_add_deco(D_PENGUIN, base + 52 + float(k * 9), gy, k * 3, k % 2 ? -1 : 1);
+                g.debug_add_deco(D_SKULLS, base + 100, gy, 2);
+                g.debug_add_tree(base + 130, gy, 56); g.debug_add_tree(base - 30, gy, 48);
+            }
+            run(g, 90, Input());
+            shot(g, w == 0 ? "31_deco_a" : "31_deco_b");
+        }
+    }
+
+    // ---- 55. the ending screen once the whole game is finished ----
+    {
+        g.debug_start_level(LAST_LEVEL, 0);
+        run(g, 3, Input());
+        g.set_state(GS_VICTORY);
+        for (int i = 0; i < 20; i++) { g.update(Input()); g.sounds.clear(); }
+        shot(g, "32_ending_a");
+        for (int i = 0; i < 300; i++) { g.update(Input()); g.sounds.clear(); }
+        shot(g, "32_ending_b");
+        CHECK(g.state() == GS_VICTORY, "the ending screen stays up after the last level");
+        g.set_state(GS_PLAY);
+    }
+
+    // ---- 56. cost of a game tick (information only) ----
+    {
+        g.debug_start_level(0, 0);
+        g.player().invuln = 100000;
+        g.debug_teleport(float(100 * TS), float(g.ground_row(100) * TS));
+        run(g, 60, Input());
+        auto t0 = std::chrono::steady_clock::now();
+        const int N = 3000;
+        for (int i = 0; i < N; i++) { g.update(Input()); g.sounds.clear(); }
+        double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count() / N;
+        printf("game logic: %.1f microseconds per tick on this PC (jungle level, %d enemies, %d birds, %d trees)\n", us, g.enemies_alive(), g.bird_count(0) + g.bird_count(1), g.tree_count());
     }
 
     // 17. portrait HUD screenshot

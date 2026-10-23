@@ -135,8 +135,18 @@ struct Gas {
     float halfW() const { return state == 2 ? 7.0f : 3.0f; }
 };
 
+// the lit explosive belt of a dead kamikaze: it lies where he fell, crackling, and goes off when the fuse runs out
+struct Belt { float x = 0, y = 0, vy = 0; int t = 0, age = 0; };
+
 // background palm tree (jungle): destroyed by explosions, then topples away from the blast
+enum DecoType { D_ROCK, D_TENT, D_CAMEL, D_CACTUS, D_IGLOO, D_PENGUIN, D_LAMP, D_RUBBLE, D_SKULLS };
+// static background scenery (drawn behind the ground, never updated)
+struct Deco { int type = 0; float x = 0, y = 0; int var = 0, w = 8, face = 1; };
+// a small bird: perched in a tree / pecking on the ground (state 0), or flying away (state 1)
+struct Bird { float x = 0, y = 0, vx = 0, vy = 0; int state = 0, t = 0, var = 0, tree = -1, face = 1; };
+
 struct Tree {
+    int kind = 0, id = 0;    // 0 palm, 1 pine, 2 bare trunk; id ties perched birds to their tree
     float x = 0, y = 0;      // foot of the trunk
     int h = 60, lean = 0;    // height, and how far the top leans sideways
     int fall = 0, dir = 1;   // >0: toppling (ticks), direction
@@ -191,6 +201,7 @@ public:
     uint8_t debug_tile(int x, int y) const { return tget(x, y); }
     void debug_explode(float x, float y, float r, float p, bool friendly = true) { explode(x, y, r, p, friendly); process_explosions(); }
     int ground_row(int tx) const { for (int y = 0; y < H; y++) if (solid_t(tx, y)) return y; return H; }
+    int world_w() const { return W; }
     int progress() const { return unlocked_of(st.slots[curSlot]); }
     void set_progress(int u) { // legacy single-slot save files
         u = u < 0 ? 0 : u > LAST_LEVEL ? LAST_LEVEL : u;
@@ -252,9 +263,18 @@ public:
     const Sprite &debug_face_dead(int b) const { return broFaceDead[b]; }
     float saw_volume() const { return (sawT > 0 && gs == GS_PLAY) ? 1.0f : 0.0f; }
     float flame_volume() const { return (flameT > 0 && gs == GS_PLAY) ? 1.0f : 0.0f; } // flamethrower loop on / off
+    int belt_count() const { return int(belts.size()); }
+    int deco_count(int type) const { int n = 0; for (const Deco &d : decos) if (d.type == type) n++; return n; }
+    int bird_count(int state) const { int n = 0; for (const Bird &b : birds) if (b.state == state) n++; return n; }
+    void debug_add_bird(float x, float y, int tree = -1) { Bird b; b.x = x; b.y = y; b.tree = tree; birds.push_back(b); }
+    void debug_add_deco(int type, float x, float y, int var = 0, int face = 1, int w = 12) { Deco d; d.type = type; d.x = x; d.y = y; d.var = var; d.face = face; d.w = w; decos.push_back(d); }
+    void debug_clear_decos() { decos.clear(); }
+    void debug_bird_state(float x, float y, int state, int var = 0) { Bird b; b.x = x; b.y = y; b.state = state; b.var = var; b.vx = 1; b.vy = -1; birds.push_back(b); }
+    void debug_clear_birds() { birds.clear(); }
+    bool debug_deco(int type, float &x, float &y) const { for (const Deco &d : decos) if (d.type == type) { x = d.x; y = d.y; return true; } return false; }
     int tree_count() const { int n = 0; for (const Tree &t : trees) if (t.fall == 0) n++; return n; }
     void debug_clear_trees() { trees.clear(); }
-    void debug_add_tree(float x, float y, int h) { Tree t; t.x = x; t.y = y; t.h = h; trees.push_back(t); }
+    int debug_add_tree(float x, float y, int h) { Tree t; t.x = x; t.y = y; t.h = h; t.id = 900 + int(trees.size()); trees.push_back(t); return t.id; }
     float heli_volume() const { return (ex.phase > 0 && gs == GS_PLAY) ? ex.vol : 0.0f; } // rotor loop level 0..1
     bool exfil_done() const { return ex.done; }
     int kill_log_size() const { return int(killLog.size()); }
@@ -276,6 +296,8 @@ public:
     int toast_ticks() const { return toastT; }
     int ammo_props() const { int n = 0; for (const Prop &p : props) if (p.type == PR_AMMO && !p.used) n++; return n; }
     void debug_set_tile(int x, int y, uint8_t t) { set_tile(x, y, t); }
+    // active soldiers (within 400 px) whose body overlaps solid ground: stuck in a gap too small for them
+    int debug_embedded(float &ex, float &ey, int &et) const { int n = 0; for (const Enemy &e : en) if (e.alive && e.type != E_BOSS && (e.a.x - pl.a.x < 400 && pl.a.x - e.a.x < 400) && box_hits(e.a.x, e.a.y, e.a.w, e.a.h)) { if (n == 0) { ex = e.a.x; ey = e.a.y; et = e.type; } n++; } return n; }
     int debug_enemy_count() const { return int(en.size()); }
     bool debug_enemy(int i, float &x, float &y, int &type) const {
         if (i < 0 || i >= int(en.size())) return false;
@@ -286,6 +308,7 @@ public:
     int debug_hidden_cages() const { int n = 0; for (const Prop &p : props) if (p.type == PR_CAGE && p.hidden) n++; return n; }
     bool debug_hidden_cage_pos(float &x, float &y) const { for (const Prop &p : props) if (p.type == PR_CAGE && p.hidden) { x = p.a.x; y = p.a.y; return true; } return false; }
     int debug_surf(int x) const { return surf[x]; }
+    void debug_set_surf(int x, int y) { surf[x] = y; }
     int debug_pillar(int x, int y) const { return pillar_at(x, y) ? pillar[y * MAXW + x] : 0; }
     int debug_pillar_total() const { int n = 0; for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) if (pillar[y * MAXW + x]) n++; return n; }
     void debug_add_pillar(int x, int y0, int y1) { add_pillar(x, y0, y1); }
@@ -318,6 +341,9 @@ private:
     int surf[MAXW]; // original ground row per column (cave/crater backdrop)
     uint8_t pillar[MAXW * MAXH]; // support pillars (background plane): hp, 0 = none. Only explosions damage them
     struct Crumble { int x, y, t; };
+    std::vector<Belt> belts;      // lit belts of dead kamikazes
+    std::vector<Deco> decos;
+    std::vector<Bird> birds;
     std::vector<Tree> trees;      // jungle palms (background plane)
     int flameT = 0, sawT = 0;               // ticks left on the flamethrower sound loop
     std::vector<Crumble> crumble; // pillar cells waiting to be checked for support (they crumble one after another)
@@ -340,6 +366,7 @@ private:
     bool solid_t(int tx, int ty) const;
     bool solid_px(float x, float y) const { return solid_t(int(x >= 0 ? x / TS : -1), int(y >= 0 ? y / TS : -1) ); }
     bool box_hits(float cx, float feet, int w, int h) const;
+    bool free_up(Actor &a, int maxUp) const; // lifts a body stuck inside the scenery out onto the surface; false if it is buried too deep
     void gen_level(int lvl);
     void stamp_bunker(int x0, int g, int w, int hh);
     void stamp_tower(int x0, int g);
@@ -409,6 +436,14 @@ private:
     void draw_trees(Gfx &g, int ox, int oy);
     void clear_topping(int tx, int ty); // spikes / barbed wire standing on a tile that just vanished go with it
     void update_trees();
+    void gen_scenery(const int *hgt);
+    void update_scenery();
+    void draw_scenery(Gfx &g, int ox, int oy);
+    void draw_birds(Gfx &g, int ox, int oy);
+    void scare_birds(float x, float y, float r);
+    void scare_tree(int id);
+    void update_belts();
+    void draw_belts(Gfx &g, int ox, int oy);
     void hit_trees(float x, float y, float r);
     void update_chunks();
     void snd(int id, float x, float y, float vol = 1.0f, float minK = 0.0f); // minK: never quieter than this fraction (far blasts stay audible)
